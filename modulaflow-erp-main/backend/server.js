@@ -1559,128 +1559,6 @@ app.delete('/api/crm/customers/:id', async (req, res) => {
     });
   }
 });
-
-app.get('/api/projects', async (req, res) => {
-  try {
-
-    const projects =
-      await prisma.project.findMany({
-        orderBy: {
-          createdAt: 'desc'
-        }
-      });
-
-    res.json({
-      success: true,
-      projects
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      success: false,
-      message: 'Failed to load projects'
-    });
-  }
-});
-
-app.post('/api/projects', async (req, res) => {
-
-  try {
-
-    const {
-      name,
-      customer,
-      site,
-      projectLead,
-      measuredArea,
-      targetDate,
-      progress,
-      value,
-      status,
-      notes
-    } = req.body;
-
-    const project =
-      await prisma.project.create({
-        data: {
-          name,
-          customer,
-          site,
-          projectLead,
-          measuredArea,
-          targetDate,
-          progress: Number(progress) || 0,
-          value: Number(value) || 0,
-          status,
-          notes
-        }
-      });
-
-    res.status(201).json({
-      success: true,
-      project
-    });
-
-  } catch (error) {
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-app.put('/api/projects/:id', async (req, res) => {
-
-  try {
-
-    const { id } = req.params;
-
-    const project =
-      await prisma.project.update({
-        where: { id },
-        data: req.body
-      });
-
-    res.json({
-      success: true,
-      project
-    });
-
-  } catch (error) {
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-app.delete('/api/projects/:id', async (req, res) => {
-
-  try {
-
-    await prisma.project.delete({
-      where: {
-        id: req.params.id
-      }
-    });
-
-    res.json({
-      success: true
-    });
-
-  } catch (error) {
-
-    res.status(500).json({
-      success: false
-    });
-  }
-});
-
 // ======================================================
 // WORK ORDERS APIs
 // ======================================================
@@ -4312,6 +4190,288 @@ app.post("/api/inventory-products/sync", async (req, res) => {
   } catch (error) {
     console.error("Sync inventory products error:", error);
     res.status(500).json({ message: "Failed to save inventory products" });
+  }
+});
+// ======================================================
+// PROJECTS APIs
+// server.js मधले जुने 4 /api/projects routes (GET, POST, PUT, DELETE)
+// delete करून त्यांच्या जागी हा पूर्ण block paste करा.
+// ======================================================
+
+const PROJECT_STATUSES = ['Pending', 'InProgress', 'Completed'];
+
+// Customer चा projects count आणि businessValue आपोआप मोजतो
+async function syncCustomerTotals(customerId) {
+  if (!customerId) return;
+
+  try {
+    const totals = await prisma.project.aggregate({
+      where: { customerId },
+      _count: { _all: true },
+      _sum: { value: true }
+    });
+
+    await prisma.customer.update({
+      where: { id: customerId },
+      data: {
+        projects: totals._count._all,
+        businessValue: totals._sum.value ?? 0
+      }
+    });
+  } catch (error) {
+    console.error('❌ Sync customer totals error:', error);
+  }
+}
+
+function formatProject(project) {
+  return {
+    ...project,
+    value: Number(project.value)
+  };
+}
+
+// GET ALL PROJECTS
+app.get('/api/projects', async (req, res) => {
+  try {
+    const projects = await prisma.project.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      projects: projects.map(formatProject)
+    });
+  } catch (error) {
+    console.error('❌ Get projects error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load projects',
+      details: error.message
+    });
+  }
+});
+
+// CREATE PROJECT
+app.post('/api/projects', async (req, res) => {
+  try {
+    const {
+      name,
+      customerId,
+      site,
+      projectLead,
+      measuredArea,
+      targetDate,
+      progress,
+      value,
+      status,
+      notes
+    } = req.body;
+
+    if (!name?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Project name is required'
+      });
+    }
+
+    if (!customerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please select a customer'
+      });
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: String(customerId) }
+    });
+
+    if (!customer) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected customer was not found'
+      });
+    }
+
+    if (status && !PROJECT_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid project status'
+      });
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        name: name.trim(),
+        customerId: customer.id,
+        customerName: customer.name,
+        site: site?.trim() || null,
+        projectLead: projectLead?.trim() || null,
+        measuredArea: measuredArea?.trim() || null,
+        targetDate: targetDate ? new Date(targetDate) : null,
+        progress: Math.min(100, Math.max(0, Number(progress) || 0)),
+        value: Number(value) || 0,
+        status: status || 'Pending',
+        notes: notes?.trim() || null
+      }
+    });
+
+    await syncCustomerTotals(project.customerId);
+
+    res.status(201).json({
+      success: true,
+      message: 'Project created successfully',
+      project: formatProject(project)
+    });
+  } catch (error) {
+    console.error('❌ Create project error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create project',
+      details: error.message
+    });
+  }
+});
+
+// UPDATE PROJECT
+app.put('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await prisma.project.findUnique({
+      where: { id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found'
+      });
+    }
+
+    const {
+      name,
+      customerId,
+      site,
+      projectLead,
+      measuredArea,
+      targetDate,
+      progress,
+      value,
+      status,
+      notes
+    } = req.body;
+
+    if (name !== undefined && !String(name).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Project name cannot be empty'
+      });
+    }
+
+    if (status !== undefined && !PROJECT_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid project status'
+      });
+    }
+
+    const data = {};
+
+    if (name !== undefined) data.name = String(name).trim();
+
+    if (customerId !== undefined && customerId !== existing.customerId) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: String(customerId) }
+      });
+
+      if (!customer) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected customer was not found'
+        });
+      }
+
+      data.customerId = customer.id;
+      data.customerName = customer.name;
+    }
+
+    if (site !== undefined) data.site = site?.trim() || null;
+    if (projectLead !== undefined) data.projectLead = projectLead?.trim() || null;
+    if (measuredArea !== undefined) data.measuredArea = measuredArea?.trim() || null;
+
+    if (targetDate !== undefined) {
+      data.targetDate = targetDate ? new Date(targetDate) : null;
+    }
+
+    if (progress !== undefined) {
+      data.progress = Math.min(100, Math.max(0, Number(progress) || 0));
+    }
+
+    if (value !== undefined) data.value = Number(value) || 0;
+    if (status !== undefined) data.status = status;
+    if (notes !== undefined) data.notes = notes?.trim() || null;
+
+    const project = await prisma.project.update({
+      where: { id },
+      data
+    });
+
+    // जुना आणि नवा दोन्ही customer चे totals update करा
+    await syncCustomerTotals(project.customerId);
+    if (existing.customerId && existing.customerId !== project.customerId) {
+      await syncCustomerTotals(existing.customerId);
+    }
+
+    res.json({
+      success: true,
+      message: 'Project updated successfully',
+      project: formatProject(project)
+    });
+  } catch (error) {
+    console.error('❌ Update project error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update project',
+      details: error.message
+    });
+  }
+});
+
+// DELETE PROJECT
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await prisma.project.findUnique({
+      where: { id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found'
+      });
+    }
+
+    await prisma.project.delete({ where: { id } });
+
+    await syncCustomerTotals(existing.customerId);
+
+    res.json({
+      success: true,
+      message: 'Project deleted successfully'
+    });
+  } catch (error) {
+    console.error('❌ Delete project error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete project',
+      details: error.message
+    });
   }
 });
 /* ===== END INVENTORY PRODUCTS API ===== */

@@ -40,6 +40,8 @@ model Customer {
   siteMeasurements SiteMeasurement[]
 
   estimations Estimation[] @relation("EstimationCustomer")
+    projectRecords Project[]
+    
 
   @@index([status])
   @@index([company])
@@ -336,4 +338,28 @@ model InventoryProduct {
   image     String?  @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+model Project {
+  id          String        @id @default(uuid())
+  name        String
+
+  customerId   String?
+  customerName String        @default("")
+  client       Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  site         String?
+  projectLead  String?
+  measuredArea String?
+  targetDate   DateTime?
+  progress     Int           @default(0)
+  value        Decimal       @default(0) @db.Decimal(15, 2)
+  status       ProjectStatus @default(Pending)
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@map("projects")
 }
