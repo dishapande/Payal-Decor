@@ -4474,6 +4474,43 @@ app.delete('/api/projects/:id', async (req, res) => {
     });
   }
 });
+app.get("/api/vendors", async (req, res) => {
+  try {
+    const vendors = await prisma.vendor.findMany({ orderBy: { createdAt: "desc" } });
+    res.json({ success: true, data: vendors });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post("/api/vendors", async (req, res) => {
+  try {
+    const { id, createdAt, updatedAt, ...data } = req.body;
+    const vendor = await prisma.vendor.create({ data });
+    res.json({ success: true, data: vendor });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put("/api/vendors/:id", async (req, res) => {
+  try {
+    const { id, createdAt, updatedAt, ...data } = req.body;
+    const vendor = await prisma.vendor.update({ where: { id: req.params.id }, data });
+    res.json({ success: true, data: vendor });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete("/api/vendors/:id", async (req, res) => {
+  try {
+    await prisma.vendor.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 /* ===== END INVENTORY PRODUCTS API ===== */
 
 /* ===== END PRODUCTION MODULE APIs ===== */

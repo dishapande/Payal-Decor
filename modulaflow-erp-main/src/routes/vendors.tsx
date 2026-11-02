@@ -1,485 +1,547 @@
 import { createFileRoute } from "@tanstack/react-router";
+import {
+  Truck,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  X,
+  RefreshCw,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/erp/AppShell";
-import { useEffect, useState } from "react";
 
 export const Route = createFileRoute("/vendors")({
-  component: Vendors,
+  component: VendorsPage,
 });
 
-type Vendor = {
+const API_BASE = (
+  import.meta.env["VITE_API_URL"] || "http://localhost:5001/api"
+).replace(/\/+$/, "");
+
+type VendorStatus = "Active" | "Inactive";
+
+interface Vendor {
   id: string;
   name: string;
-  contactPerson: string;
+  company: string;
   phone: string;
   email: string;
+  category: string;
+  city: string;
+  status: VendorStatus;
+  gstin: string;
   address: string;
-  gst: string;
-  status: string;
+  state: string;
+  pincode: string;
+  contactPerson: string;
+  notes: string;
+}
+
+const emptyForm: Omit<Vendor, "id"> = {
+  name: "",
+  company: "",
+  phone: "",
+  email: "",
+  category: "",
+  city: "",
+  status: "Active",
+  gstin: "",
+  address: "",
+  state: "",
+  pincode: "",
+  contactPerson: "",
+  notes: "",
 };
 
-const defaultVendors: Vendor[] = [
-  {
-    id: "VEN-001",
-    name: "ABC Hardware",
-    contactPerson: "Rahul Patil",
-    phone: "9876543210",
-    email: "abc@example.com",
-    address: "Pune",
-    gst: "27ABCDE1234F1Z5",
-    status: "Active",
-  },
-  {
-    id: "VEN-002",
-    name: "XYZ Plywood",
-    contactPerson: "Amit Shah",
-    phone: "9876543211",
-    email: "xyz@example.com",
-    address: "Mumbai",
-    gst: "27XYZDE5678G1Z2",
-    status: "Active",
-  },
+const categories = [
+  "Plywood",
+  "Laminates",
+  "Hardware",
+  "Edge Band",
+  "Glass",
+  "Fabric",
+  "Other",
 ];
 
-function Vendors() {
+async function readResponse(response: Response) {
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || data.success === false) {
+    throw new Error(data.message || `Request failed (${response.status})`);
+  }
+
+  return data;
+}
+
+function VendorsPage() {
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [name, setName] = useState("");
-  const [contactPerson, setContactPerson] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
-  const [gst, setGst] = useState("");
-  const [status, setStatus] = useState("Active");
-
-  const [editingVendorId, setEditingVendorId] = useState<string | null>(
-    null
-  );
-
-  const [vendors, setVendors] = useState<Vendor[]>(() => {
-    if (typeof window === "undefined") {
-      return defaultVendors;
-    }
-
-    const savedVendors = localStorage.getItem("vendors");
-
-    if (!savedVendors) {
-      return defaultVendors;
-    }
+  const loadVendors = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
     try {
-      return JSON.parse(savedVendors);
-    } catch {
-      return defaultVendors;
+      const response = await fetch(`${API_BASE}/vendors`);
+      const data = await readResponse(response);
+      const rows = Array.isArray(data) ? data : data.vendors ?? data.data ?? [];
+
+      setVendors(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Vendors load झाले नाहीत.");
+    } finally {
+      setLoading(false);
     }
-  });
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem("vendors", JSON.stringify(vendors));
-  }, [vendors]);
+    void loadVendors();
+  }, [loadVendors]);
 
-  const resetForm = () => {
-    setName("");
-    setContactPerson("");
-    setPhone("");
-    setEmail("");
-    setAddress("");
-    setGst("");
-    setStatus("Active");
-    setEditingVendorId(null);
-    setShowForm(false);
-  };
+  const filteredVendors = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-  const handleSaveVendor = () => {
-    if (!name.trim() || !phone.trim()) {
-      alert("Please fill Vendor Name and Phone Number.");
-      return;
+    if (!query) return vendors;
+
+    return vendors.filter((vendor) =>
+      [
+        vendor.name,
+        vendor.company,
+        vendor.phone,
+        vendor.email,
+        vendor.category,
+        vendor.city,
+        vendor.status,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query)),
+    );
+  }, [vendors, search]);
+
+  function updateField<K extends keyof typeof emptyForm>(
+    field: K,
+    value: (typeof emptyForm)[K],
+  ) {
+    setForm((previous) => ({ ...previous, [field]: value }));
+  }
+
+  function openCreateForm() {
+    setEditingId(null);
+    setForm({ ...emptyForm });
+    setError("");
+    setSuccess("");
+    setShowForm(true);
+  }
+
+  function openEditForm(vendor: Vendor) {
+    setEditingId(vendor.id);
+
+    setForm({
+      name: vendor.name ?? "",
+      company: vendor.company ?? "",
+      phone: vendor.phone ?? "",
+      email: vendor.email ?? "",
+      category: vendor.category ?? "",
+      city: vendor.city ?? "",
+      status: vendor.status ?? "Active",
+      gstin: vendor.gstin ?? "",
+      address: vendor.address ?? "",
+      state: vendor.state ?? "",
+      pincode: vendor.pincode ?? "",
+      contactPerson: vendor.contactPerson ?? "",
+      notes: vendor.notes ?? "",
+    });
+
+    setError("");
+    setSuccess("");
+    setShowForm(true);
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const url = editingId
+        ? `${API_BASE}/vendors/${encodeURIComponent(editingId)}`
+        : `${API_BASE}/vendors`;
+
+      const response = await fetch(url, {
+        method: editingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+
+      await readResponse(response);
+      setSuccess(editingId ? "Vendor update झाला." : "Vendor save झाला.");
+      setShowForm(false);
+      setEditingId(null);
+      setForm({ ...emptyForm });
+      await loadVendors();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Vendor save झाला नाही.");
+    } finally {
+      setSaving(false);
     }
+  }
 
-    if (editingVendorId) {
-      setVendors((prev) =>
-        prev.map((vendor) =>
-          vendor.id === editingVendorId
-            ? {
-                ...vendor,
-                name: name.trim(),
-                contactPerson: contactPerson.trim(),
-                phone: phone.trim(),
-                email: email.trim(),
-                address: address.trim(),
-                gst: gst.trim(),
-                status,
-              }
-            : vendor
-        )
+  async function deleteVendor(vendor: Vendor) {
+    const confirmed = window.confirm(
+      `${vendor.name} हा vendor delete करायचा आहे का?`,
+    );
+
+    if (!confirmed) return;
+
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/vendors/${encodeURIComponent(vendor.id)}`,
+        { method: "DELETE" },
       );
 
-      alert("Vendor updated successfully!");
-      resetForm();
-      return;
+      await readResponse(response);
+      setSuccess("Vendor delete झाला.");
+      await loadVendors();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Vendor delete झाला नाही.");
     }
+  }
 
-    const nextNumber =
-      vendors.length > 0
-        ? Math.max(
-            ...vendors.map((vendor) =>
-              Number(vendor.id.replace("VEN-", ""))
-            )
-          ) + 1
-        : 1;
-
-    const newVendor: Vendor = {
-      id: `VEN-${String(nextNumber).padStart(3, "0")}`,
-      name: name.trim(),
-      contactPerson: contactPerson.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      address: address.trim(),
-      gst: gst.trim(),
-      status,
-    };
-
-    setVendors((prev) => [...prev, newVendor]);
-
-    alert("Vendor saved successfully!");
-
-    resetForm();
-  };
-
-  const handleEdit = (vendor: Vendor) => {
-    setEditingVendorId(vendor.id);
-
-    setName(vendor.name);
-    setContactPerson(vendor.contactPerson);
-    setPhone(vendor.phone);
-    setEmail(vendor.email);
-    setAddress(vendor.address);
-    setGst(vendor.gst);
-    setStatus(vendor.status);
-
-    setShowForm(true);
-  };
-
-  const handleDelete = (id: string) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this vendor?"
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setVendors((prev) =>
-      prev.filter((vendor) => vendor.id !== id)
-    );
-
-    alert("Vendor deleted successfully!");
-  };
-
-  const updateStatus = (id: string, newStatus: string) => {
-    setVendors((prev) =>
-      prev.map((vendor) =>
-        vendor.id === id
-          ? { ...vendor, status: newStatus }
-          : vendor
-      )
-    );
-  };
+  const inputClass =
+    "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-amber-700 focus:ring-2 focus:ring-amber-100";
 
   return (
     <AppShell title="Vendors">
-      <div className="space-y-6">
-
-        {/* Header */}
-        <div className="flex items-center justify-between">
+      <div className="space-y-5 p-4 md:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-semibold">
-              Vendor Management
-            </h2>
-
-            <p className="text-sm text-muted-foreground">
-              Manage your vendors and supplier information.
+            <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
+              <Truck className="h-6 w-6" />
+              Vendors
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Manage suppliers, their contact details and categories.
             </p>
           </div>
 
-          <button
-            onClick={() => {
-              resetForm();
-              setShowForm(true);
-            }}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-          >
-            + New Vendor
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void loadVendors()}
+              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={openCreateForm}
+              className="inline-flex items-center gap-2 rounded-lg bg-amber-800 px-4 py-2 text-sm font-medium text-white hover:bg-amber-900"
+            >
+              <Plus className="h-4 w-4" />
+              Add Vendor
+            </button>
+          </div>
         </div>
 
-        {/* Form */}
-        {showForm && (
-          <div className="rounded-lg border border-border bg-card p-6">
-
-            <h3 className="mb-4 text-lg font-semibold">
-              {editingVendorId
-                ? "Edit Vendor"
-                : "Create Vendor"}
-            </h3>
-
-            <div className="grid gap-4 md:grid-cols-2">
-
-              {/* Vendor Name */}
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Vendor Name *
-                </label>
-
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Enter vendor name"
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                />
-              </div>
-
-              {/* Contact Person */}
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Contact Person
-                </label>
-
-                <input
-                  value={contactPerson}
-                  onChange={(e) =>
-                    setContactPerson(e.target.value)
-                  }
-                  placeholder="Enter contact person"
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                />
-              </div>
-
-              {/* Phone */}
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Phone *
-                </label>
-
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Enter phone number"
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                />
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Email
-                </label>
-
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter email"
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                />
-              </div>
-
-              {/* GST */}
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  GST Number
-                </label>
-
-                <input
-                  value={gst}
-                  onChange={(e) => setGst(e.target.value)}
-                  placeholder="Enter GST number"
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm uppercase outline-none"
-                />
-              </div>
-
-              {/* Status */}
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Status
-                </label>
-
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
-
-              {/* Address */}
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium">
-                  Address
-                </label>
-
-                <textarea
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="Enter vendor address"
-                  rows={3}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                />
-              </div>
-            </div>
-
-            {/* Buttons */}
-            <div className="mt-5 flex gap-3">
-
-              <button
-                onClick={resetForm}
-                className="rounded-md border border-border px-4 py-2 text-sm"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleSaveVendor}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              >
-                {editingVendorId
-                  ? "Update Vendor"
-                  : "Save Vendor"}
-              </button>
-
-            </div>
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
           </div>
         )}
 
-        {/* Vendor List */}
-        <div className="rounded-lg border border-border bg-card p-6">
+        {success && (
+          <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+            {success}
+          </div>
+        )}
 
-          <h3 className="mb-4 text-lg font-semibold">
-            Vendors
-          </h3>
-
-          <div className="overflow-x-auto">
-
-            <table className="w-full text-sm">
-
-              <thead>
-                <tr className="border-b border-border text-left">
-
-                  <th className="px-3 py-3">
-                    Vendor ID
-                  </th>
-
-                  <th className="px-3 py-3">
-                    Vendor Name
-                  </th>
-
-                  <th className="px-3 py-3">
-                    Contact Person
-                  </th>
-
-                  <th className="px-3 py-3">
-                    Phone
-                  </th>
-
-                  <th className="px-3 py-3">
-                    GST
-                  </th>
-
-                  <th className="px-3 py-3">
-                    Status
-                  </th>
-
-                  <th className="px-3 py-3">
-                    Actions
-                  </th>
-
-                </tr>
-              </thead>
-
-              <tbody>
-
-                {vendors.map((vendor) => (
-                  <tr
-                    key={vendor.id}
-                    className="border-b border-border"
-                  >
-
-                    <td className="px-3 py-3">
-                      {vendor.id}
-                    </td>
-
-                    <td className="px-3 py-3 font-medium">
-                      {vendor.name}
-                    </td>
-
-                    <td className="px-3 py-3">
-                      {vendor.contactPerson || "-"}
-                    </td>
-
-                    <td className="px-3 py-3">
-                      {vendor.phone}
-                    </td>
-
-                    <td className="px-3 py-3">
-                      {vendor.gst || "-"}
-                    </td>
-
-                    <td className="px-3 py-3">
-                      <select
-                        value={vendor.status}
-                        onChange={(e) =>
-                          updateStatus(
-                            vendor.id,
-                            e.target.value
-                          )
-                        }
-                        className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-                      >
-                        <option value="Active">
-                          Active
-                        </option>
-
-                        <option value="Inactive">
-                          Inactive
-                        </option>
-                      </select>
-                    </td>
-
-                    <td className="px-3 py-3">
-                      <div className="flex gap-2">
-
-                        <button
-                          onClick={() =>
-                            handleEdit(vendor)
-                          }
-                          className="rounded-md border border-border px-3 py-1 text-sm"
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            handleDelete(vendor.id)
-                          }
-                          className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
-                        >
-                          Delete
-                        </button>
-
-                      </div>
-                    </td>
-
-                  </tr>
-                ))}
-
-              </tbody>
-
-            </table>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border bg-white p-4">
+            <p className="text-sm text-gray-500">Total Vendors</p>
+            <p className="mt-1 text-2xl font-bold">{vendors.length}</p>
+          </div>
+          <div className="rounded-xl border bg-white p-4">
+            <p className="text-sm text-gray-500">Active Vendors</p>
+            <p className="mt-1 text-2xl font-bold">
+              {vendors.filter((item) => item.status === "Active").length}
+            </p>
+          </div>
+          <div className="rounded-xl border bg-white p-4">
+            <p className="text-sm text-gray-500">Inactive Vendors</p>
+            <p className="mt-1 text-2xl font-bold">
+              {vendors.filter((item) => item.status === "Inactive").length}
+            </p>
           </div>
         </div>
 
+        {showForm && (
+          <section className="rounded-xl border bg-white p-4 md:p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                {editingId ? "Edit Vendor" : "Add Vendor"}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                aria-label="Close form"
+                className="rounded p-1 hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <label className="space-y-1 text-sm">
+                  <span>Vendor Name *</span>
+                  <input
+                    className={inputClass}
+                    required
+                    value={form.name}
+                    onChange={(e) => updateField("name", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Company Name *</span>
+                  <input
+                    className={inputClass}
+                    required
+                    value={form.company}
+                    onChange={(e) => updateField("company", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Phone *</span>
+                  <input
+                    className={inputClass}
+                    required
+                    value={form.phone}
+                    onChange={(e) => updateField("phone", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Email</span>
+                  <input
+                    className={inputClass}
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => updateField("email", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Category</span>
+                  <select
+                    className={inputClass}
+                    value={form.category}
+                    onChange={(e) => updateField("category", e.target.value)}
+                  >
+                    <option value="">Select category</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Status</span>
+                  <select
+                    className={inputClass}
+                    value={form.status}
+                    onChange={(e) =>
+                      updateField("status", e.target.value as VendorStatus)
+                    }
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Contact Person</span>
+                  <input
+                    className={inputClass}
+                    value={form.contactPerson}
+                    onChange={(e) =>
+                      updateField("contactPerson", e.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>GSTIN</span>
+                  <input
+                    className={inputClass}
+                    value={form.gstin}
+                    onChange={(e) => updateField("gstin", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>City</span>
+                  <input
+                    className={inputClass}
+                    value={form.city}
+                    onChange={(e) => updateField("city", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>State</span>
+                  <input
+                    className={inputClass}
+                    value={form.state}
+                    onChange={(e) => updateField("state", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Pincode</span>
+                  <input
+                    className={inputClass}
+                    value={form.pincode}
+                    onChange={(e) => updateField("pincode", e.target.value)}
+                  />
+                </label>
+              </div>
+
+              <label className="block space-y-1 text-sm">
+                <span>Address</span>
+                <textarea
+                  className={inputClass}
+                  rows={2}
+                  value={form.address}
+                  onChange={(e) => updateField("address", e.target.value)}
+                />
+              </label>
+
+              <label className="block space-y-1 text-sm">
+                <span>Notes</span>
+                <textarea
+                  className={inputClass}
+                  rows={2}
+                  value={form.notes}
+                  onChange={(e) => updateField("notes", e.target.value)}
+                />
+              </label>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-lg bg-amber-800 px-5 py-2 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {saving
+                    ? "Saving..."
+                    : editingId
+                      ? "Update Vendor"
+                      : "Save Vendor"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowForm(false)}
+                  className="rounded-lg border px-5 py-2 text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+
+        <section className="overflow-hidden rounded-xl border bg-white">
+          <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="font-semibold">Vendor Records</h2>
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                className={`${inputClass} pl-9`}
+                placeholder="Search vendors..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {loading ? (
+            <p className="p-6 text-sm text-gray-500">Loading vendors...</p>
+          ) : filteredVendors.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">
+              No vendors yet. Use Add Vendor to create the first one.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[850px] text-left text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="p-3">Vendor</th>
+                    <th className="p-3">Company</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3">Phone</th>
+                    <th className="p-3">City</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredVendors.map((vendor) => (
+                    <tr key={vendor.id} className="hover:bg-gray-50">
+                      <td className="p-3 font-medium">{vendor.name}</td>
+                      <td className="p-3">{vendor.company}</td>
+                      <td className="p-3">{vendor.category || "—"}</td>
+                      <td className="p-3">{vendor.phone}</td>
+                      <td className="p-3">{vendor.city || "—"}</td>
+                      <td className="p-3">
+                        <span className="rounded-full bg-gray-100 px-2 py-1 text-xs">
+                          {vendor.status}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditForm(vendor)}
+                            aria-label="Edit vendor"
+                            className="rounded p-2 text-blue-600 hover:bg-blue-50"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteVendor(vendor)}
+                            aria-label="Delete vendor"
+                            className="rounded p-2 text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </AppShell>
   );

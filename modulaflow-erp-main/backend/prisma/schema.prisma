@@ -363,3 +363,21 @@ model Project {
   @@index([status])
   @@map("projects")
 }
+model Vendor {
+  id            String   @id @default(cuid())
+  name          String
+  company       String
+  phone         String
+  email         String   @default("")
+  category      String   @default("")
+  city          String   @default("")
+  status        String   @default("Active")
+  gstin         String   @default("")
+  address       String   @default("")
+  state         String   @default("")
+  pincode       String   @default("")
+  contactPerson String   @default("")
+  notes         String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
