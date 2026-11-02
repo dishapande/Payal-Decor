@@ -6,6 +6,17 @@ export const Route = createFileRoute("/purchase")({
   component: Purchase,
 });
 
+const API_BASE = (
+  import.meta.env["VITE_API_URL"] || "http://localhost:5001/api"
+).replace(/\/+$/, "");
+
+type VendorOption = {
+  id: string;
+  name: string;
+  company: string;
+  status: string;
+};
+
 type PurchaseOrder = {
   poNo: string;
   vendor: string;
@@ -61,6 +72,9 @@ function Purchase() {
   const [gst, setGst] = useState("");
   const [status, setStatus] = useState("Pending");
 
+  // Vendors module मधली Active vendors ची यादी
+  const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([]);
+
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
     if (typeof window === "undefined") {
       return defaultPurchaseOrders;
@@ -88,6 +102,25 @@ function Purchase() {
       JSON.stringify(purchaseOrders)
     );
   }, [purchaseOrders]);
+
+  // Load Active vendors from the Vendors module
+  useEffect(() => {
+    async function loadVendors() {
+      try {
+        const response = await fetch(`${API_BASE}/vendors`);
+        const data = await response.json();
+        const rows = Array.isArray(data) ? data : data.vendors ?? data.data ?? [];
+
+        setVendorOptions(
+          rows.filter((item: VendorOption) => item.status === "Active"),
+        );
+      } catch {
+        setVendorOptions([]);
+      }
+    }
+
+    void loadVendors();
+  }, []);
 
   // Reset form
   const resetForm = () => {
@@ -258,20 +291,39 @@ function Purchase() {
 
             <div className="grid gap-4 md:grid-cols-2">
 
-              {/* Vendor */}
+              {/* Vendor (Vendors module मधून निवडा) */}
               <div>
                 <label className="mb-1 block text-sm font-medium">
                   Vendor *
                 </label>
 
-                <input
+                <select
                   value={vendor}
                   onChange={(e) =>
                     setVendor(e.target.value)
                   }
-                  placeholder="Enter vendor name"
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
-                />
+                >
+                  <option value="">Select vendor</option>
+
+                  {/* जुन्या orders चा vendor (यादीत नसला तरी) edit करताना रिकामा होऊ नये */}
+                  {vendor &&
+                    !vendorOptions.some(
+                      (item) => item.company === vendor,
+                    ) && <option value={vendor}>{vendor}</option>}
+
+                  {vendorOptions.map((item) => (
+                    <option key={item.id} value={item.company}>
+                      {item.company} ({item.name})
+                    </option>
+                  ))}
+                </select>
+
+                {vendorOptions.length === 0 && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    No active vendors found. Add vendors in the Vendors module first.
+                  </p>
+                )}
               </div>
 
               {/* Purchase Date */}

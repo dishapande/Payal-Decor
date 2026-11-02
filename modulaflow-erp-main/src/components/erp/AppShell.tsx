@@ -47,7 +47,7 @@ const NAV: NavItem[] = [
   { label: "Production", icon: Factory, to: "/production" },
   { label: "Inventory", icon: Boxes, to: "/inventory" },
   { label: "Purchase", icon: ShoppingBag, to: "/purchase" },
-  { label: "Vendors", icon: Users },
+    { label: "Vendors", icon: Users, to: "/vendors" },
   { label: "Dispatch & Delivery", icon: Truck },
   { label: "Installation", icon: Wrench },
   { label: "Invoicing", icon: ReceiptIndianRupee, to: "/invoicing" },
