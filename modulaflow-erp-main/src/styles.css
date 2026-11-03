@@ -147,10 +147,25 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Noto Sans Devanagari", sans-serif;
     font-feature-settings: "cv02", "ss01";
   }
 }
 
 @utility tabular {
   font-variant-numeric: tabular-nums;
+}
+.goog-te-banner-frame,
+.skiptranslate iframe {
+  display: none !important;
+}
+body {
+  top: 0 !important;
+}
+.goog-tooltip,
+.goog-text-highlight {
+  background: none !important;
+  box-shadow: none !important;
 }

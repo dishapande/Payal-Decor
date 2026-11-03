@@ -26,9 +26,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 import { UserMenu } from "@/components/UserMenu";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 interface NavItem {
   label: string;
@@ -47,7 +49,7 @@ const NAV: NavItem[] = [
   { label: "Production", icon: Factory, to: "/production" },
   { label: "Inventory", icon: Boxes, to: "/inventory" },
   { label: "Purchase", icon: ShoppingBag, to: "/purchase" },
-    { label: "Vendors", icon: Users, to: "/vendors" },
+  { label: "Vendors", icon: Users, to: "/vendors" },
   { label: "Dispatch & Delivery", icon: Truck },
   { label: "Installation", icon: Wrench },
   { label: "Invoicing", icon: ReceiptIndianRupee, to: "/invoicing" },
@@ -59,6 +61,7 @@ const NAV: NavItem[] = [
 ];
 
 function Sidebar({ open }: { open: boolean }) {
+  const { t } = useTranslation();
   const pathname = useRouterState({
     select: (s) => s.location.pathname,
   });
@@ -85,7 +88,7 @@ function Sidebar({ open }: { open: boolean }) {
 
       <nav className="flex-1 overflow-y-auto px-3 py-3">
         <p className="px-3 pb-2 pt-3 text-[10px] font-semibold tracking-[0.16em] text-sidebar-foreground/45">
-          MODULES
+          {t("modules", { defaultValue: "MODULES" })}
         </p>
 
         <ul className="space-y-0.5">
@@ -96,11 +99,13 @@ function Sidebar({ open }: { open: boolean }) {
               <>
                 <item.icon className="size-[18px] shrink-0" />
 
-                <span className="flex-1 truncate">{item.label}</span>
+                <span className="flex-1 truncate">
+                  {t(`nav.${item.label}`, { defaultValue: item.label })}
+                </span>
 
                 {!item.to && (
                   <span className="rounded-full bg-sidebar-accent px-2 py-0.5 text-[9px] uppercase tracking-wide text-sidebar-foreground/50">
-                    soon
+                    {t("soon", { defaultValue: "soon" })}
                   </span>
                 )}
               </>
@@ -156,6 +161,7 @@ export function AppShell({
   title: string;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   return (
@@ -180,13 +186,15 @@ export function AppShell({
             <Menu className="size-5" />
           </button>
 
-          <h1 className="text-base font-semibold">{title}</h1>
+          <h1 className="text-base font-semibold">
+            {t(`nav.${title}`, { defaultValue: title })}
+          </h1>
 
           <div className="mx-auto hidden w-full max-w-md items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-sm text-muted-foreground md:flex">
             <Search className="size-4" />
 
             <input
-              placeholder="Search anything..."
+              placeholder={t("search", { defaultValue: "Search anything..." })}
               className="w-full bg-transparent outline-none placeholder:text-muted-foreground"
             />
 
@@ -199,6 +207,8 @@ export function AppShell({
             <IconBadge icon={Bell} count={5} />
             <IconBadge icon={Calendar} />
             <IconBadge icon={MessageSquare} count={3} />
+
+            <LanguageSwitcher />
 
             <div className="mx-2 hidden items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm lg:flex">
               Payal Decor Pvt. Ltd.
