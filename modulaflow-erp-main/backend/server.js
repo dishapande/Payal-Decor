@@ -4838,6 +4838,58 @@ app.delete('/api/dispatches/:id', async (req, res) => {
 // ====== START SERVER ======
 // ============================================
 app.listen(PORT, () => {
+  // ======================================================
+// DISPATCH TABLE: backend सुरू होताना table नसेल तर बनवतो
+// ======================================================
+async function ensureDispatchTable() {
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "dispatches" (
+        "id" TEXT NOT NULL,
+        "dispatchNo" TEXT NOT NULL,
+        "workOrderNo" TEXT,
+        "salesOrderNo" TEXT,
+        "customerId" TEXT,
+        "customerName" TEXT NOT NULL,
+        "projectName" TEXT,
+        "deliveryAddress" TEXT NOT NULL,
+        "vehicleNo" TEXT,
+        "driverName" TEXT,
+        "driverPhone" TEXT,
+        "transporter" TEXT,
+        "challanNo" TEXT,
+        "dispatchDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "expectedDelivery" TIMESTAMP(3),
+        "deliveredDate" TIMESTAMP(3),
+        "receivedBy" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'Pending',
+        "notes" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL,
+        CONSTRAINT "dispatches_pkey" PRIMARY KEY ("id")
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "dispatches_dispatchNo_key" ON "dispatches"("dispatchNo")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "dispatches_status_idx" ON "dispatches"("status")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "dispatches_customerId_idx" ON "dispatches"("customerId")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "dispatches_workOrderNo_idx" ON "dispatches"("workOrderNo")`
+    );
+
+    console.log('✅ Dispatch table is ready');
+  } catch (error) {
+    console.error('❌ Could not create dispatch table:', error);
+  }
+}
+
+ensureDispatchTable();
   console.log('=================================');
   console.log('🚀 Server is running!');
   console.log(`📍 URL: http://localhost:${PORT}`);
