@@ -4511,6 +4511,322 @@ app.delete("/api/vendors/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ======================================================
+// DISPATCH & DELIVERY APIs
+// ======================================================
+
+const DISPATCH_STATUSES = [
+  'Pending',
+  'Dispatched',
+  'In Transit',
+  'Delivered',
+  'Cancelled'
+];
+
+function dispatchText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || null;
+}
+
+async function generateDispatchNumber() {
+  const shortYear = String(new Date().getFullYear()).slice(-2);
+
+  const last = await prisma.dispatch.findFirst({
+    orderBy: { createdAt: 'desc' },
+    select: { dispatchNo: true }
+  });
+
+  let next = 1;
+
+  if (last?.dispatchNo) {
+    const match = last.dispatchNo.match(/DN-\d{2}-(\d+)/);
+    if (match) next = Number(match[1]) + 1;
+  }
+
+  return `DN-${shortYear}-${String(next).padStart(3, '0')}`;
+}
+
+// GET ALL DISPATCHES
+app.get('/api/dispatches', async (req, res) => {
+  try {
+    const dispatches = await prisma.dispatch.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, dispatches });
+  } catch (error) {
+    console.error('❌ Get dispatches error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load dispatches',
+      details: error.message
+    });
+  }
+});
+
+// CREATE DISPATCH
+app.post('/api/dispatches', async (req, res) => {
+  try {
+    const b = req.body;
+
+    if (!dispatchText(b.customerName)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer name is required'
+      });
+    }
+
+    if (!dispatchText(b.deliveryAddress)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery address is required'
+      });
+    }
+
+    const status = b.status || 'Pending';
+
+    if (!DISPATCH_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dispatch status'
+      });
+    }
+
+    const dispatch = await prisma.dispatch.create({
+      data: {
+        dispatchNo: await generateDispatchNumber(),
+
+        workOrderNo: dispatchText(b.workOrderNo),
+        salesOrderNo: dispatchText(b.salesOrderNo),
+        customerId: dispatchText(b.customerId),
+        customerName: dispatchText(b.customerName),
+        projectName: dispatchText(b.projectName),
+
+        deliveryAddress: dispatchText(b.deliveryAddress),
+
+        vehicleNo: dispatchText(b.vehicleNo),
+        driverName: dispatchText(b.driverName),
+        driverPhone: dispatchText(b.driverPhone),
+        transporter: dispatchText(b.transporter),
+        challanNo: dispatchText(b.challanNo),
+
+        dispatchDate: b.dispatchDate ? new Date(b.dispatchDate) : new Date(),
+        expectedDelivery: b.expectedDelivery
+          ? new Date(b.expectedDelivery)
+          : null,
+        deliveredDate: b.deliveredDate
+          ? new Date(b.deliveredDate)
+          : status === 'Delivered'
+            ? new Date()
+            : null,
+        receivedBy: dispatchText(b.receivedBy),
+
+        status,
+        notes: dispatchText(b.notes)
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Dispatch created successfully',
+      dispatch
+    });
+  } catch (error) {
+    console.error('❌ Create dispatch error:', error);
+
+    if (error.code === 'P2002') {
+      return res.status(409).json({
+        success: false,
+        message: 'Dispatch number already exists. Please try again.'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create dispatch',
+      details: error.message
+    });
+  }
+});
+
+// UPDATE DISPATCH
+app.put('/api/dispatches/:id', async (req, res) => {
+  try {
+    const b = req.body;
+
+    const existing = await prisma.dispatch.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dispatch not found'
+      });
+    }
+
+    if (b.status !== undefined && !DISPATCH_STATUSES.includes(b.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dispatch status'
+      });
+    }
+
+    const data = {};
+
+    const optionalTextFields = [
+      'workOrderNo',
+      'salesOrderNo',
+      'customerId',
+      'projectName',
+      'vehicleNo',
+      'driverName',
+      'driverPhone',
+      'transporter',
+      'challanNo',
+      'receivedBy',
+      'notes'
+    ];
+
+    for (const field of optionalTextFields) {
+      if (b[field] !== undefined) data[field] = dispatchText(b[field]);
+    }
+
+    for (const field of ['customerName', 'deliveryAddress']) {
+      if (b[field] !== undefined) {
+        if (!dispatchText(b[field])) {
+          return res.status(400).json({
+            success: false,
+            message: `${field} cannot be empty`
+          });
+        }
+        data[field] = dispatchText(b[field]);
+      }
+    }
+
+    if (b.dispatchDate) data.dispatchDate = new Date(b.dispatchDate);
+
+    for (const field of ['expectedDelivery', 'deliveredDate']) {
+      if (b[field] !== undefined) {
+        data[field] = b[field] ? new Date(b[field]) : null;
+      }
+    }
+
+    if (b.status !== undefined) {
+      data.status = b.status;
+
+      if (
+        b.status === 'Delivered' &&
+        !data.deliveredDate &&
+        !existing.deliveredDate
+      ) {
+        data.deliveredDate = new Date();
+      }
+    }
+
+    const dispatch = await prisma.dispatch.update({
+      where: { id: req.params.id },
+      data
+    });
+
+    res.json({
+      success: true,
+      message: 'Dispatch updated successfully',
+      dispatch
+    });
+  } catch (error) {
+    console.error('❌ Update dispatch error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update dispatch',
+      details: error.message
+    });
+  }
+});
+
+// UPDATE DISPATCH STATUS ONLY
+app.patch('/api/dispatches/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    if (!DISPATCH_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid dispatch status'
+      });
+    }
+
+    const existing = await prisma.dispatch.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dispatch not found'
+      });
+    }
+
+    const dispatch = await prisma.dispatch.update({
+      where: { id: req.params.id },
+      data: {
+        status,
+        ...(status === 'Delivered' && !existing.deliveredDate
+          ? { deliveredDate: new Date() }
+          : {})
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Dispatch status updated successfully',
+      dispatch
+    });
+  } catch (error) {
+    console.error('❌ Update dispatch status error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update dispatch status',
+      details: error.message
+    });
+  }
+});
+
+// DELETE DISPATCH
+app.delete('/api/dispatches/:id', async (req, res) => {
+  try {
+    const existing = await prisma.dispatch.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dispatch not found'
+      });
+    }
+
+    await prisma.dispatch.delete({ where: { id: req.params.id } });
+
+    res.json({
+      success: true,
+      message: 'Dispatch deleted successfully'
+    });
+  } catch (error) {
+    console.error('❌ Delete dispatch error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete dispatch',
+      details: error.message
+    });
+  }
+});
+
+/* ===== END DISPATCH & DELIVERY APIs ===== */
 /* ===== END INVENTORY PRODUCTS API ===== */
 
 /* ===== END PRODUCTION MODULE APIs ===== */
