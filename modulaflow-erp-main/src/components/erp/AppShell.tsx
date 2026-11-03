@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import "@/i18n";
 
 import { cn } from "@/lib/utils";
 import { UserMenu } from "@/components/UserMenu";

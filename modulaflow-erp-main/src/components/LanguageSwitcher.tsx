@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { Globe } from "lucide-react";
 
 const LANGS = [
@@ -8,57 +7,77 @@ const LANGS = [
   { code: "hi", label: "हिन्दी" },
 ];
 
-// Google Translate मुळे React चे DOM बदल तुटू नयेत म्हणून safety patch
-if (typeof window !== "undefined" && typeof Node === "function") {
+// Google Translate मुळे React चे DOM तुटू नये म्हणून safety patch
+if (typeof window !== "undefined") {
   const w = window as any;
-  if (!w.__domPatched) {
-    w.__domPatched = true;
+  if (!w.__gtPatched) {
+    w.__gtPatched = true;
     const origRemove = Node.prototype.removeChild;
     (Node.prototype as any).removeChild = function (child: Node) {
       if (child.parentNode !== this) return child;
-      return origRemove.call(this, child);
+      return origRemove.call(this, child) as Node;
     };
     const origInsert = Node.prototype.insertBefore;
     (Node.prototype as any).insertBefore = function (newNode: Node, ref: Node | null) {
       if (ref && ref.parentNode !== this) return newNode;
-      return origInsert.call(this, newNode, ref);
+      return origInsert.call(this, newNode, ref) as Node;
     };
   }
 }
 
-function setGoogleCookie(code: string) {
-  const expire = "expires=Thu, 01 Jan 1970 00:00:00 UTC";
-  const isLocal = location.hostname === "localhost";
-  if (code === "en") {
-    document.cookie = `googtrans=; ${expire}; path=/`;
-    if (!isLocal) document.cookie = `googtrans=; ${expire}; path=/; domain=${location.hostname}`;
-  } else {
-    document.cookie = `googtrans=/en/${code}; path=/`;
-    if (!isLocal)
-      document.cookie = `googtrans=/en/${code}; path=/; domain=${location.hostname}`;
+function readLang(): string {
+  const m = document.cookie.match(/(?:^|;\s*)googtrans=\/[^/]+\/(\w+)/);
+  return m ? m[1] : "en";
+}
+
+function writeLang(code: string) {
+  const host = location.hostname;
+  const expire = "Thu, 01 Jan 1970 00:00:00 UTC";
+  const clear = (domain?: string) => {
+    document.cookie = `googtrans=; expires=${expire}; path=/${domain ? `; domain=${domain}` : ""}`;
+  };
+  clear();
+  clear(host);
+  clear("." + host);
+  if (code !== "en") {
+    const val = `/en/${code}`;
+    document.cookie = `googtrans=${val}; path=/`;
+    if (host !== "localhost") {
+      document.cookie = `googtrans=${val}; path=/; domain=${host}`;
+    }
   }
 }
 
+const CSS = `
+  .goog-te-banner-frame, .goog-te-balloon-frame, #goog-gt-tt,
+  .goog-tooltip, iframe.skiptranslate { display: none !important; }
+  body { top: 0 !important; }
+  .goog-text-highlight { background: none !important; box-shadow: none !important; }
+  #google_translate_element { display: none; }
+`;
+
 export default function LanguageSwitcher() {
-  const { i18n } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [lang, setLang] = useState("en");
 
   useEffect(() => {
-    const saved = localStorage.getItem("lang");
-    if (saved && saved !== i18n.language) i18n.changeLanguage(saved);
+    setLang(readLang());
 
-    // Google Translate script load
+    // Google चा element एकदाच, React च्या बाहेर बनवतो
+    if (!document.getElementById("google_translate_element")) {
+      const el = document.createElement("div");
+      el.id = "google_translate_element";
+      document.body.appendChild(el);
+    }
+
     const w = window as any;
     w.googleTranslateElementInit = () => {
       new w.google.translate.TranslateElement(
-        {
-          pageLanguage: "en",
-          includedLanguages: "en,mr,hi",
-          autoDisplay: false,
-        },
+        { pageLanguage: "en", includedLanguages: "en,mr,hi", autoDisplay: false },
         "google_translate_element",
       );
     };
+
     if (!document.getElementById("google-translate-script")) {
       const s = document.createElement("script");
       s.id = "google-translate-script";
@@ -67,21 +86,19 @@ export default function LanguageSwitcher() {
       s.async = true;
       document.body.appendChild(s);
     }
-  }, [i18n]);
+  }, []);
 
   const change = (code: string) => {
-    localStorage.setItem("lang", code);
-    i18n.changeLanguage(code);
-    setGoogleCookie(code);
+    writeLang(code);
     setOpen(false);
-    window.location.reload(); // पूर्ण page नवीन भाषेत लोड होण्यासाठी
+    window.location.reload();
   };
 
-  const current = LANGS.find((l) => l.code === i18n.language)?.label ?? "English";
+  const current = LANGS.find((l) => l.code === lang)?.label ?? "English";
 
   return (
-    <div className="relative">
-      <div id="google_translate_element" className="hidden" />
+    <div className="relative notranslate" translate="no">
+      <style>{CSS}</style>
 
       <button
         onClick={() => setOpen((v) => !v)}
