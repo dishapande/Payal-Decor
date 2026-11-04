@@ -4825,6 +4825,356 @@ app.delete('/api/dispatches/:id', async (req, res) => {
     });
   }
 });
+// ======================================================
+// INSTALLATION APIs
+// ======================================================
+
+const INSTALLATION_STATUSES = [
+  'Pending',
+  'Scheduled',
+  'In Progress',
+  'Completed',
+  'Cancelled'
+];
+
+function installText(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || null;
+}
+
+async function generateInstallationNumber() {
+  const shortYear = String(new Date().getFullYear()).slice(-2);
+
+  const last = await prisma.installation.findFirst({
+    orderBy: { createdAt: 'desc' },
+    select: { installationNo: true }
+  });
+
+  let next = 1;
+
+  if (last?.installationNo) {
+    const match = last.installationNo.match(/IN-\d{2}-(\d+)/);
+    if (match) next = Number(match[1]) + 1;
+  }
+
+  return `IN-${shortYear}-${String(next).padStart(3, '0')}`;
+}
+
+// GET ALL INSTALLATIONS
+app.get('/api/installations', async (req, res) => {
+  try {
+    const installations = await prisma.installation.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ success: true, installations });
+  } catch (error) {
+    console.error('❌ Get installations error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load installations',
+      details: error.message
+    });
+  }
+});
+
+// CREATE INSTALLATION
+app.post('/api/installations', async (req, res) => {
+  try {
+    const b = req.body;
+
+    if (!installText(b.customerName)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer name is required'
+      });
+    }
+
+    if (!installText(b.siteAddress)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Site address is required'
+      });
+    }
+
+    const status = b.status || 'Pending';
+
+    if (!INSTALLATION_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid installation status'
+      });
+    }
+
+    const installation = await prisma.installation.create({
+      data: {
+        installationNo: await generateInstallationNumber(),
+
+        dispatchNo: installText(b.dispatchNo),
+        workOrderNo: installText(b.workOrderNo),
+        customerId: installText(b.customerId),
+        customerName: installText(b.customerName),
+        projectName: installText(b.projectName),
+
+        siteAddress: installText(b.siteAddress),
+
+        installerName: installText(b.installerName),
+        installerPhone: installText(b.installerPhone),
+
+        scheduledDate: b.scheduledDate ? new Date(b.scheduledDate) : null,
+        completedDate: b.completedDate
+          ? new Date(b.completedDate)
+          : status === 'Completed'
+            ? new Date()
+            : null,
+        signedOffBy: installText(b.signedOffBy),
+
+        status,
+        notes: installText(b.notes)
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Installation created successfully',
+      installation
+    });
+  } catch (error) {
+    console.error('❌ Create installation error:', error);
+
+    if (error.code === 'P2002') {
+      return res.status(409).json({
+        success: false,
+        message: 'Installation number already exists. Please try again.'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create installation',
+      details: error.message
+    });
+  }
+});
+
+// UPDATE INSTALLATION
+app.put('/api/installations/:id', async (req, res) => {
+  try {
+    const b = req.body;
+
+    const existing = await prisma.installation.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Installation not found'
+      });
+    }
+
+    if (b.status !== undefined && !INSTALLATION_STATUSES.includes(b.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid installation status'
+      });
+    }
+
+    const data = {};
+
+    const optionalTextFields = [
+      'dispatchNo',
+      'workOrderNo',
+      'customerId',
+      'projectName',
+      'installerName',
+      'installerPhone',
+      'signedOffBy',
+      'notes'
+    ];
+
+    for (const field of optionalTextFields) {
+      if (b[field] !== undefined) data[field] = installText(b[field]);
+    }
+
+    for (const field of ['customerName', 'siteAddress']) {
+      if (b[field] !== undefined) {
+        if (!installText(b[field])) {
+          return res.status(400).json({
+            success: false,
+            message: `${field} cannot be empty`
+          });
+        }
+        data[field] = installText(b[field]);
+      }
+    }
+
+    for (const field of ['scheduledDate', 'completedDate']) {
+      if (b[field] !== undefined) {
+        data[field] = b[field] ? new Date(b[field]) : null;
+      }
+    }
+
+    if (b.status !== undefined) {
+      data.status = b.status;
+
+      if (
+        b.status === 'Completed' &&
+        !data.completedDate &&
+        !existing.completedDate
+      ) {
+        data.completedDate = new Date();
+      }
+    }
+
+    const installation = await prisma.installation.update({
+      where: { id: req.params.id },
+      data
+    });
+
+    res.json({
+      success: true,
+      message: 'Installation updated successfully',
+      installation
+    });
+  } catch (error) {
+    console.error('❌ Update installation error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update installation',
+      details: error.message
+    });
+  }
+});
+
+// UPDATE INSTALLATION STATUS ONLY
+app.patch('/api/installations/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    if (!INSTALLATION_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid installation status'
+      });
+    }
+
+    const existing = await prisma.installation.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Installation not found'
+      });
+    }
+
+    const installation = await prisma.installation.update({
+      where: { id: req.params.id },
+      data: {
+        status,
+        ...(status === 'Completed' && !existing.completedDate
+          ? { completedDate: new Date() }
+          : {})
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Installation status updated successfully',
+      installation
+    });
+  } catch (error) {
+    console.error('❌ Update installation status error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update installation status',
+      details: error.message
+    });
+  }
+});
+
+// DELETE INSTALLATION
+app.delete('/api/installations/:id', async (req, res) => {
+  try {
+    const existing = await prisma.installation.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Installation not found'
+      });
+    }
+
+    await prisma.installation.delete({ where: { id: req.params.id } });
+
+    res.json({
+      success: true,
+      message: 'Installation deleted successfully'
+    });
+  } catch (error) {
+    console.error('❌ Delete installation error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete installation',
+      details: error.message
+    });
+  }
+});
+
+// Backend सुरू होताना table नसेल तर बनवतो (Render वर उपयोगी)
+async function ensureInstallationTable() {
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "installations" (
+        "id" TEXT NOT NULL,
+        "installationNo" TEXT NOT NULL,
+        "dispatchNo" TEXT,
+        "workOrderNo" TEXT,
+        "customerId" TEXT,
+        "customerName" TEXT NOT NULL,
+        "projectName" TEXT,
+        "siteAddress" TEXT NOT NULL,
+        "installerName" TEXT,
+        "installerPhone" TEXT,
+        "scheduledDate" TIMESTAMP(3),
+        "completedDate" TIMESTAMP(3),
+        "signedOffBy" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'Pending',
+        "notes" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL,
+        CONSTRAINT "installations_pkey" PRIMARY KEY ("id")
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "installations_installationNo_key" ON "installations"("installationNo")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "installations_status_idx" ON "installations"("status")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "installations_customerId_idx" ON "installations"("customerId")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "installations_dispatchNo_idx" ON "installations"("dispatchNo")`
+    );
+
+    console.log('✅ Installation table is ready');
+  } catch (error) {
+    console.error('❌ Could not create installation table:', error);
+  }
+}
+
+/* ===== END INSTALLATION APIs ===== */
 
 /* ===== END DISPATCH & DELIVERY APIs ===== */
 /* ===== END INVENTORY PRODUCTS API ===== */
@@ -4838,6 +5188,8 @@ app.delete('/api/dispatches/:id', async (req, res) => {
 // ====== START SERVER ======
 // ============================================
 app.listen(PORT, () => {
+  ensureDispatchTable();
+ensureInstallationTable();  
   // ======================================================
 // DISPATCH TABLE: backend सुरू होताना table नसेल तर बनवतो
 // ======================================================

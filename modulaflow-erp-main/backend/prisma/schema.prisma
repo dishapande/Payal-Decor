@@ -415,3 +415,33 @@ model Dispatch {
   @@index([workOrderNo])
   @@map("dispatches")
 }
+model Installation {
+  id             String  @id @default(cuid())
+  installationNo String  @unique
+
+  dispatchNo  String?
+  workOrderNo String?
+  customerId  String?
+  customerName String
+  projectName  String?
+
+  siteAddress String
+
+  installerName  String?
+  installerPhone String?
+
+  scheduledDate DateTime?
+  completedDate DateTime?
+  signedOffBy   String?
+
+  status String  @default("Pending")
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([customerId])
+  @@index([dispatchNo])
+  @@map("installations")
+}
