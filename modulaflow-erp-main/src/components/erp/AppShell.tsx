@@ -52,7 +52,7 @@ const NAV: NavItem[] = [
   { label: "Purchase", icon: ShoppingBag, to: "/purchase" },
   { label: "Vendors", icon: Users, to: "/vendors" },
     { label: "Dispatch & Delivery", icon: Truck, to: "/dispatch" },
-  { label: "Installation", icon: Wrench },
+  { label: "Installation", to: "/installation", icon: Wrench },
   { label: "Invoicing", icon: ReceiptIndianRupee, to: "/invoicing" },
   { label: "Payments", icon: Wallet },
   { label: "Accounts", icon: BookOpen },
