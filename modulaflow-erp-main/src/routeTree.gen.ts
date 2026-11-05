@@ -15,9 +15,11 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BomMaterialRequirementRouteImport } from './routes/bom-material-requirement'
 import { Route as CrmRouteImport } from './routes/crm'
 import { Route as DispatchRouteImport } from './routes/dispatch'
+import { Route as EstimatePreviewRouteImport } from './routes/estimate-preview'
 import { Route as EstimationRouteImport } from './routes/estimation'
 import { Route as InstallationRouteImport } from './routes/installation'
 import { Route as InventoryRouteImport } from './routes/inventory'
+import { Route as InvoicePreviewRouteImport } from './routes/invoice-preview'
 import { Route as InvoicingRouteImport } from './routes/invoicing'
 import { Route as LeadEnquiryRouteImport } from './routes/lead-enquiry'
 import { Route as LoginRouteImport } from './routes/login'
@@ -70,6 +72,11 @@ const DispatchRoute = DispatchRouteImport.update({
   path: '/dispatch',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EstimatePreviewRoute = EstimatePreviewRouteImport.update({
+  id: '/estimate-preview',
+  path: '/estimate-preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EstimationRoute = EstimationRouteImport.update({
   id: '/estimation',
   path: '/estimation',
@@ -83,6 +90,11 @@ const InstallationRoute = InstallationRouteImport.update({
 const InventoryRoute = InventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvoicePreviewRoute = InvoicePreviewRouteImport.update({
+  id: '/invoice-preview',
+  path: '/invoice-preview',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvoicingRoute = InvoicingRouteImport.update({
@@ -198,9 +210,11 @@ export interface FileRoutesByFullPath {
   '/bom-material-requirement': typeof BomMaterialRequirementRoute
   '/crm': typeof CrmRoute
   '/dispatch': typeof DispatchRoute
+  '/estimate-preview': typeof EstimatePreviewRoute
   '/estimation': typeof EstimationRoute
   '/installation': typeof InstallationRoute
   '/inventory': typeof InventoryRoute
+  '/invoice-preview': typeof InvoicePreviewRoute
   '/invoicing': typeof InvoicingRoute
   '/lead-enquiry': typeof LeadEnquiryRoute
   '/login': typeof LoginRoute
@@ -229,9 +243,11 @@ export interface FileRoutesByTo {
   '/bom-material-requirement': typeof BomMaterialRequirementRoute
   '/crm': typeof CrmRoute
   '/dispatch': typeof DispatchRoute
+  '/estimate-preview': typeof EstimatePreviewRoute
   '/estimation': typeof EstimationRoute
   '/installation': typeof InstallationRoute
   '/inventory': typeof InventoryRoute
+  '/invoice-preview': typeof InvoicePreviewRoute
   '/invoicing': typeof InvoicingRoute
   '/lead-enquiry': typeof LeadEnquiryRoute
   '/login': typeof LoginRoute
@@ -262,9 +278,11 @@ export interface FileRoutesById {
   '/bom-material-requirement': typeof BomMaterialRequirementRoute
   '/crm': typeof CrmRoute
   '/dispatch': typeof DispatchRoute
+  '/estimate-preview': typeof EstimatePreviewRoute
   '/estimation': typeof EstimationRoute
   '/installation': typeof InstallationRoute
   '/inventory': typeof InventoryRoute
+  '/invoice-preview': typeof InvoicePreviewRoute
   '/invoicing': typeof InvoicingRoute
   '/lead-enquiry': typeof LeadEnquiryRoute
   '/login': typeof LoginRoute
@@ -296,9 +314,11 @@ export interface FileRouteTypes {
     | '/bom-material-requirement'
     | '/crm'
     | '/dispatch'
+    | '/estimate-preview'
     | '/estimation'
     | '/installation'
     | '/inventory'
+    | '/invoice-preview'
     | '/invoicing'
     | '/lead-enquiry'
     | '/login'
@@ -327,9 +347,11 @@ export interface FileRouteTypes {
     | '/bom-material-requirement'
     | '/crm'
     | '/dispatch'
+    | '/estimate-preview'
     | '/estimation'
     | '/installation'
     | '/inventory'
+    | '/invoice-preview'
     | '/invoicing'
     | '/lead-enquiry'
     | '/login'
@@ -359,9 +381,11 @@ export interface FileRouteTypes {
     | '/bom-material-requirement'
     | '/crm'
     | '/dispatch'
+    | '/estimate-preview'
     | '/estimation'
     | '/installation'
     | '/inventory'
+    | '/invoice-preview'
     | '/invoicing'
     | '/lead-enquiry'
     | '/login'
@@ -392,9 +416,11 @@ export interface RootRouteChildren {
   BomMaterialRequirementRoute: typeof BomMaterialRequirementRoute
   CrmRoute: typeof CrmRoute
   DispatchRoute: typeof DispatchRoute
+  EstimatePreviewRoute: typeof EstimatePreviewRoute
   EstimationRoute: typeof EstimationRoute
   InstallationRoute: typeof InstallationRoute
   InventoryRoute: typeof InventoryRoute
+  InvoicePreviewRoute: typeof InvoicePreviewRoute
   InvoicingRoute: typeof InvoicingRoute
   LeadEnquiryRoute: typeof LeadEnquiryRoute
   LoginRoute: typeof LoginRoute
@@ -455,6 +481,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DispatchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/estimate-preview': {
+      id: '/estimate-preview'
+      path: '/estimate-preview'
+      fullPath: '/estimate-preview'
+      preLoaderRoute: typeof EstimatePreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/estimation': {
       id: '/estimation'
       path: '/estimation'
@@ -474,6 +507,13 @@ declare module '@tanstack/react-router' {
       path: '/inventory'
       fullPath: '/inventory'
       preLoaderRoute: typeof InventoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invoice-preview': {
+      id: '/invoice-preview'
+      path: '/invoice-preview'
+      fullPath: '/invoice-preview'
+      preLoaderRoute: typeof InvoicePreviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invoicing': {
@@ -664,9 +704,11 @@ const rootRouteChildren: RootRouteChildren = {
   BomMaterialRequirementRoute: BomMaterialRequirementRoute,
   CrmRoute: CrmRoute,
   DispatchRoute: DispatchRoute,
+  EstimatePreviewRoute: EstimatePreviewRoute,
   EstimationRoute: EstimationRoute,
   InstallationRoute: InstallationRoute,
   InventoryRoute: InventoryRoute,
+  InvoicePreviewRoute: InvoicePreviewRoute,
   InvoicingRoute: InvoicingRoute,
   LeadEnquiryRoute: LeadEnquiryRoute,
   LoginRoute: LoginRoute,

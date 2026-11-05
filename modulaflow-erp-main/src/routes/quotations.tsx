@@ -7,9 +7,19 @@ import {
   X,
   RefreshCw,
   Eye,
+  FileText,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AppShell } from "@/components/erp/AppShell";
+import {
+  EstimateDocument,
+  QUOTATION_TERMS,
+  amountInWords,
+  calcEstimate,
+  type EstimateData,
+  type EstimateItem,
+} from "@/components/erp/EstimateDocument";
 
 export const Route = createFileRoute("/quotations")({
   component: QuotationsPage,
@@ -19,31 +29,38 @@ const API_BASE = (
   import.meta.env.VITE_API_URL || "http://localhost:5001/api"
 ).replace(/\/+$/, "");
 
+const UNITS = ["Nos", "Sqf", "Sqm", "Rft", "Trip", "Lot", "Set"];
+
 interface CustomerOption {
   id: string;
   name: string;
   company?: string;
   phone?: string;
+  address?: string;
 }
 
+/** /estimate-docs मधून येणारा PDF-style estimate */
 interface EstimateOption {
-  id: string | number;
-  estimateNo?: string;
-  estimationNumber?: string;
-  quotationNo?: string;
-  customerId?: string | null;
-  customerName?: string;
-  projectName?: string;
-  totalAmount?: number | string;
-  totalSellingPrice?: number | string;
-  grandTotal?: number | string;
-  status?: string;
+  id: string;
+  estimateNo: string;
+  estimateDate?: string;
+  customerId: string | null;
+  customerName: string;
+  customerAddress?: string | null;
+  projectName?: string | null;
+  placeOfSupply?: string;
+  items: EstimateItem[];
+  taxRate: number;
+  total?: number;
+  terms?: string[] | null;
 }
 
 interface QuotationItem {
   id: string;
   itemName: string;
   description: string;
+  hsn: string;
+  sizes: string;
   quantity: number;
   unit: string;
   rate: number;
@@ -54,15 +71,17 @@ interface Quotation {
   quotationNo: string;
   customerId: string | null;
   customerName: string;
+  customerAddress: string;
   projectName: string;
-  estimateId: string | number | null;
+  estimateId:  null;
   quotationDate: string;
   validUntil: string;
   status: string;
   gstRate: number;
+  placeOfSupply: string;
+  terms: string[];
   notes: string;
   items: QuotationItem[];
-  createdAt?: string;
   subtotal: number;
   gstAmount: number;
   grandTotal: number;
@@ -71,12 +90,15 @@ interface Quotation {
 type QuotationForm = {
   customerId: string;
   customerName: string;
+  customerAddress: string;
   projectName: string;
   estimateId: string;
   quotationDate: string;
   validUntil: string;
   status: string;
   gstRate: string;
+  placeOfSupply: string;
+  termsText: string;
   notes: string;
   items: QuotationItem[];
 };
@@ -84,24 +106,41 @@ type QuotationForm = {
 const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
+const PRINT_FIX = `
+@media print {
+  body > *:not(.est-portal) { display: none !important; }
+  .est-overlay {
+    position: static !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+}
+`;
+
 const emptyItem = (): QuotationItem => ({
   id: crypto.randomUUID(),
   itemName: "",
   description: "",
+  hsn: "9403",
+  sizes: "",
   quantity: 1,
-  unit: "NOS",
+  unit: "Nos",
   rate: 0,
 });
 
 const createEmptyForm = (): QuotationForm => ({
   customerId: "",
   customerName: "",
+  customerAddress: "",
   projectName: "",
   estimateId: "",
   quotationDate: new Date().toISOString().slice(0, 10),
   validUntil: "",
   status: "Draft",
   gstRate: "18",
+  placeOfSupply: "27-Maharashtra",
+  termsText: QUOTATION_TERMS.join("\n"),
   notes: "",
   items: [emptyItem()],
 });
@@ -110,9 +149,7 @@ async function parseResponse(response: Response): Promise<any> {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok || data.success === false) {
-    throw new Error(
-      data.message || `Request failed (${response.status})`,
-    );
+    throw new Error(data.message || `Request failed (${response.status})`);
   }
 
   return data;
@@ -122,9 +159,7 @@ function getList<T>(data: any, keys: string[]): T[] {
   if (Array.isArray(data)) return data;
 
   for (const key of keys) {
-    if (Array.isArray(data?.[key])) {
-      return data[key] as T[];
-    }
+    if (Array.isArray(data?.[key])) return data[key] as T[];
   }
 
   return [];
@@ -139,67 +174,57 @@ function money(value: number | string | null | undefined) {
   }).format(Number(value) || 0);
 }
 
-function getSubtotal(items: QuotationItem[]) {
-  return items.reduce(
-    (sum, item) =>
-      sum +
-      Math.max(0, Number(item.quantity) || 0) *
-        Math.max(0, Number(item.rate) || 0),
-    0,
-  );
-}
-
+/** Estimate PDF सारखाच हिशेब: Sub Total + Tax, मग Round off */
 function getTotals(items: QuotationItem[], gstRate: number) {
-  const subtotal = getSubtotal(items);
-  const gstAmount = subtotal * (gstRate / 100);
+  const { subTotal, taxAmount, roundOff, total } = calcEstimate(
+    items.map((i) => ({
+      name: i.itemName,
+      qty: Math.max(0, Number(i.quantity) || 0),
+      price: Math.max(0, Number(i.rate) || 0),
+    })),
+    gstRate,
+  );
 
-  return {
-    subtotal,
-    gstAmount,
-    grandTotal: subtotal + gstAmount,
-  };
+  return { subtotal: subTotal, gstAmount: taxAmount, roundOff, grandTotal: total };
 }
 
 function createQuotationNumber() {
+  // तात्पुरता नंबर. backend ने 2026-27/012 सारखी series दिली तर ती वापरा.
   return `QT-${Date.now()}`;
 }
 
-function normalizeQuotationItem(row: any): QuotationItem {
+function normalizeItem(row: any): QuotationItem {
   return {
     id: String(row.id ?? crypto.randomUUID()),
     itemName: row.itemName ?? row.name ?? "",
     description: row.description ?? "",
-    quantity: Number(row.quantity ?? 1),
-    unit: row.unit ?? "NOS",
-    rate: Number(row.rate ?? row.unitPrice ?? 0),
+    hsn: row.hsn ?? "9403",
+    sizes: row.sizes ?? "",
+    quantity: Number(row.quantity ?? row.qty ?? 1),
+    unit: row.unit ?? "Nos",
+    rate: Number(row.rate ?? row.unitPrice ?? row.price ?? 0),
   };
 }
 
 function normalizeQuotation(row: any): Quotation {
-  const items = Array.isArray(row.items)
-    ? row.items.map(normalizeQuotationItem)
-    : [];
-
+  const items = Array.isArray(row.items) ? row.items.map(normalizeItem) : [];
   const gstRate = Number(row.gstRate ?? 18);
   const totals = getTotals(items, gstRate);
 
   return {
-    ...row,
     id: String(row.id),
-    quotationNo:
-      row.quotationNo || row.quotationNumber || "QT-PENDING",
+    quotationNo: row.quotationNo || row.quotationNumber || "QT-PENDING",
     customerId: row.customerId != null ? String(row.customerId) : null,
     customerName: row.customerName ?? row.customer?.name ?? "",
+    customerAddress: row.customerAddress ?? row.customer?.address ?? "",
     projectName: row.projectName ?? "",
-    estimateId: row.estimateId ?? row.estimationId ?? null,
-    quotationDate: row.quotationDate
-      ? String(row.quotationDate).slice(0, 10)
-      : "",
-    validUntil: row.validUntil
-      ? String(row.validUntil).slice(0, 10)
-      : "",
+    estimateId: row.estimateId != null ? String(row.estimateId) : null,
+    quotationDate: row.quotationDate ? String(row.quotationDate).slice(0, 10) : "",
+    validUntil: row.validUntil ? String(row.validUntil).slice(0, 10) : "",
     status: row.status ?? "Draft",
     gstRate,
+    placeOfSupply: row.placeOfSupply ?? "27-Maharashtra",
+    terms: Array.isArray(row.terms) ? row.terms : [],
     notes: row.notes ?? "",
     items,
     subtotal: Number(row.subtotal ?? totals.subtotal),
@@ -212,17 +237,40 @@ function normalizeEstimate(row: any): EstimateOption {
   return {
     ...row,
     id: String(row.id),
-    estimateNo: row.estimateNo ?? row.estimationNumber,
-    estimationNumber: row.estimationNumber ?? row.estimateNo,
     customerId: row.customerId != null ? String(row.customerId) : null,
-    customerName: row.customerName ?? row.customer?.name ?? "",
-    projectName: row.projectName ?? "",
-    totalSellingPrice: row.totalSellingPrice ?? row.grandTotal,
+    items: Array.isArray(row.items) ? row.items : [],
+    taxRate: Number(row.taxRate ?? 18),
   };
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+/** Quotation -> PDF component साठी data */
+function toDocData(q: Quotation): EstimateData {
+  return {
+    estimateNo: q.quotationNo,
+    date: q.quotationDate || new Date().toISOString().slice(0, 10),
+    customerName: q.customerName,
+    customerAddress: q.customerAddress || undefined,
+    placeOfSupply: q.placeOfSupply,
+    items: q.items.map((i) => ({
+      name: i.itemName,
+      description: i.description,
+      hsn: i.hsn,
+      sizes: i.sizes,
+      qty: i.quantity,
+      unit: i.unit,
+      price: i.rate,
+    })),
+    taxRate: q.gstRate,
+    terms: q.terms.length
+      ? q.terms
+      : q.notes
+        ? q.notes.split("\n").filter(Boolean)
+        : undefined,
+  };
 }
 
 function QuotationsPage() {
@@ -233,6 +281,7 @@ function QuotationsPage() {
   const [form, setForm] = useState<QuotationForm>(createEmptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Quotation | null>(null);
+  const [preview, setPreview] = useState<EstimateData | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
@@ -250,16 +299,11 @@ function QuotationsPage() {
     try {
       const response = await fetch(`${API_BASE}/quotations`);
       const data = await parseResponse(response);
-
       setQuotations(
-        getList<any>(data, ["quotations", "data"]).map(
-          normalizeQuotation,
-        ),
+        getList<any>(data, ["quotations", "data"]).map(normalizeQuotation),
       );
     } catch (err) {
-      setError(
-        getErrorMessage(err, "Quotations could not be loaded."),
-      );
+      setError(getErrorMessage(err, "Quotations could not be loaded."));
     } finally {
       setLoading(false);
     }
@@ -268,38 +312,27 @@ function QuotationsPage() {
   const loadCustomers = useCallback(async () => {
     const response = await fetch(`${API_BASE}/crm/customers`);
     const data = await parseResponse(response);
-
-    setCustomers(
-      getList<CustomerOption>(data, ["customers", "data"]),
-    );
+    setCustomers(getList<CustomerOption>(data, ["customers", "data"]));
   }, []);
 
+  // PDF-style estimates (EstimateBuilder चाच स्रोत)
   const loadEstimates = useCallback(async () => {
-    const response = await fetch(`${API_BASE}/estimations`);
+    const response = await fetch(`${API_BASE}/estimate-docs`);
     const data = await parseResponse(response);
-
     setEstimates(
-      getList<any>(data, ["estimations", "estimates", "data"]).map(
-        normalizeEstimate,
-      ),
+      getList<any>(data, ["estimates", "data"]).map(normalizeEstimate),
     );
   }, []);
 
   const loadDropdowns = useCallback(async () => {
-    const results = await Promise.allSettled([
-      loadCustomers(),
-      loadEstimates(),
-    ]);
-
-    const failed = results.find(
-      (result) => result.status === "rejected",
-    );
+    const results = await Promise.allSettled([loadCustomers(), loadEstimates()]);
+    const failed = results.find((r) => r.status === "rejected");
 
     if (failed?.status === "rejected") {
       setError(
         failed.reason instanceof Error
-          ? `Customer/Estimation list could not load: ${failed.reason.message}`
-          : "Customer/Estimation list could not load.",
+          ? `Customer/Estimate list could not load: ${failed.reason.message}`
+          : "Customer/Estimate list could not load.",
       );
     }
   }, [loadCustomers, loadEstimates]);
@@ -318,9 +351,7 @@ function QuotationsPage() {
         item.customerName,
         item.projectName,
         item.status,
-      ].some((value) =>
-        String(value ?? "").toLowerCase().includes(query),
-      );
+      ].some((value) => String(value ?? "").toLowerCase().includes(query));
 
       const matchesStatus =
         statusFilter === "All" || item.status === statusFilter;
@@ -338,51 +369,56 @@ function QuotationsPage() {
     field: K,
     value: QuotationForm[K],
   ) {
-    setForm((previous) => ({
-      ...previous,
-      [field]: value,
-    }));
+    setForm((previous) => ({ ...previous, [field]: value }));
   }
 
   function selectCustomer(customerId: string) {
-    const customer = customers.find(
-      (item) => item.id === customerId,
-    );
+    const customer = customers.find((item) => item.id === customerId);
 
     setForm((previous) => ({
       ...previous,
       customerId,
-      customerName: customer?.name ?? previous.customerName,
+      customerName: customer?.company || customer?.name || previous.customerName,
+      customerAddress: customer?.address ?? previous.customerAddress,
     }));
   }
 
+  /** Estimate निवडला की customer, project, items, tax, terms सगळं भरतं */
   function selectEstimate(estimateId: string) {
-    const estimate = estimates.find(
-      (item) => String(item.id) === estimateId,
-    );
+    const estimate = estimates.find((item) => item.id === estimateId);
 
     if (!estimate) {
-      setForm((previous) => ({
-        ...previous,
-        estimateId: "",
-      }));
+      setField("estimateId", "");
       return;
     }
-
-    const customerId = estimate.customerId ?? "";
-    const linkedCustomer = customers.find(
-      (customer) => customer.id === customerId,
-    );
 
     setForm((previous) => ({
       ...previous,
       estimateId,
-      customerId: customerId || previous.customerId,
-      customerName:
-        linkedCustomer?.name ??
-        estimate.customerName ??
-        previous.customerName,
+      customerId: estimate.customerId ?? previous.customerId,
+      customerName: estimate.customerName || previous.customerName,
+      customerAddress: estimate.customerAddress ?? previous.customerAddress,
       projectName: estimate.projectName || previous.projectName,
+      placeOfSupply: estimate.placeOfSupply || previous.placeOfSupply,
+      gstRate: String(estimate.taxRate ?? 18),
+      termsText: estimate.terms?.length
+        ? estimate.terms
+            .map((t) => t.replace("Estimate Valid", "Quotation Valid"))
+            .join("\n")
+        : previous.termsText,
+      items: estimate.items.length
+        ? estimate.items.map((i) =>
+            normalizeItem({
+              name: i.name,
+              description: i.description,
+              hsn: i.hsn,
+              sizes: i.sizes,
+              qty: i.qty,
+              unit: i.unit,
+              price: i.price,
+            }),
+          )
+        : previous.items,
     }));
   }
 
@@ -401,15 +437,17 @@ function QuotationsPage() {
 
     setForm({
       customerId: item.customerId ?? "",
-      customerName: item.customerName ?? "",
-      projectName: item.projectName ?? "",
-      estimateId:
-        item.estimateId != null ? String(item.estimateId) : "",
-      quotationDate: item.quotationDate || "",
-      validUntil: item.validUntil || "",
-      status: item.status || "Draft",
-      gstRate: String(item.gstRate ?? 18),
-      notes: item.notes || "",
+      customerName: item.customerName,
+      customerAddress: item.customerAddress,
+      projectName: item.projectName,
+      estimateId: item.estimateId ?? "",
+      quotationDate: item.quotationDate,
+      validUntil: item.validUntil,
+      status: item.status,
+      gstRate: String(item.gstRate),
+      placeOfSupply: item.placeOfSupply,
+      termsText: (item.terms.length ? item.terms : QUOTATION_TERMS).join("\n"),
+      notes: item.notes,
       items: item.items.length
         ? item.items.map((row) => ({ ...row }))
         : [emptyItem()],
@@ -455,29 +493,20 @@ function QuotationsPage() {
       setError("Please select a CRM customer.");
       return false;
     }
-
     if (!form.customerName.trim()) {
       setError("Please enter the customer name.");
       return false;
     }
-
     if (!form.projectName.trim()) {
       setError("Please enter the project name.");
       return false;
     }
-
     if (!form.quotationDate) {
       setError("Please select the quotation date.");
       return false;
     }
-
     if (form.validUntil && form.validUntil < form.quotationDate) {
       setError("Validity date cannot be before the quotation date.");
-      return false;
-    }
-
-    if (form.items.length === 0) {
-      setError("Please add at least one quotation item.");
       return false;
     }
 
@@ -486,12 +515,10 @@ function QuotationsPage() {
         setError("Please enter an item name for every item.");
         return false;
       }
-
       if (!Number.isFinite(Number(item.quantity)) || item.quantity <= 0) {
         setError("Quantity must be greater than zero.");
         return false;
       }
-
       if (!Number.isFinite(Number(item.rate)) || item.rate < 0) {
         setError("Rate cannot be negative.");
         return false;
@@ -505,16 +532,14 @@ function QuotationsPage() {
       return false;
     }
 
-    const selectedEstimate = estimates.find(
-      (item) => String(item.id) === form.estimateId,
-    );
+    const selectedEstimate = estimates.find((e) => e.id === form.estimateId);
 
     if (
       selectedEstimate?.customerId &&
       selectedEstimate.customerId !== form.customerId
     ) {
       setError(
-        "The selected estimation belongs to a different customer. Please select the correct customer.",
+        "The selected estimate belongs to a different customer. Please select the correct customer.",
       );
       return false;
     }
@@ -532,42 +557,43 @@ function QuotationsPage() {
     setSaving(true);
 
     try {
-      const selectedCustomer = customers.find(
-        (customer) => customer.id === form.customerId,
-      );
-
       const existing = editingId
         ? quotations.find((item) => item.id === editingId)
         : undefined;
 
-      const quotationTotals = getTotals(
-        form.items,
-        Number(form.gstRate) || 0,
-      );
+      const quotationTotals = getTotals(form.items, Number(form.gstRate) || 0);
 
       const payload = {
         quotationNo: existing?.quotationNo ?? createQuotationNumber(),
         customerId: form.customerId,
-        customerName:
-          selectedCustomer?.name ?? form.customerName.trim(),
+        customerName: form.customerName.trim(),
+        customerAddress: form.customerAddress.trim() || null,
         projectName: form.projectName.trim(),
         estimateId: form.estimateId || null,
         quotationDate: form.quotationDate,
         validUntil: form.validUntil || null,
         status: form.status,
         gstRate: Number(form.gstRate),
+        placeOfSupply: form.placeOfSupply.trim(),
+        terms: form.termsText
+          .split("\n")
+          .map((t) => t.trim())
+          .filter(Boolean),
         notes: form.notes.trim() || null,
         items: form.items.map((item) => ({
           itemName: item.itemName.trim(),
           description: item.description.trim() || null,
+          hsn: item.hsn.trim() || null,
+          sizes: item.sizes.trim() || null,
           quantity: Number(item.quantity),
           unit: item.unit,
           rate: Number(item.rate),
-          amount: Number(
-            (Number(item.quantity) * Number(item.rate)).toFixed(2),
-          ),
+          amount: Number((Number(item.quantity) * Number(item.rate)).toFixed(2)),
         })),
-        ...quotationTotals,
+        subtotal: quotationTotals.subtotal,
+        gstAmount: quotationTotals.gstAmount,
+        roundOff: quotationTotals.roundOff,
+        grandTotal: quotationTotals.grandTotal,
       };
 
       const url = editingId
@@ -595,20 +621,14 @@ function QuotationsPage() {
       await loadQuotations();
       await loadDropdowns();
     } catch (err) {
-      setError(
-        getErrorMessage(err, "Quotation could not be saved."),
-      );
+      setError(getErrorMessage(err, "Quotation could not be saved."));
     } finally {
       setSaving(false);
     }
   }
 
   async function deleteQuotation(item: Quotation) {
-    if (
-      !window.confirm(
-        `Are you sure you want to delete ${item.quotationNo}?`,
-      )
-    ) {
+    if (!window.confirm(`Are you sure you want to delete ${item.quotationNo}?`)) {
       return;
     }
 
@@ -620,14 +640,11 @@ function QuotationsPage() {
         `${API_BASE}/quotations/${encodeURIComponent(item.id)}`,
         { method: "DELETE" },
       );
-
       await parseResponse(response);
 
       setSuccess("Quotation deleted successfully.");
 
-      if (viewing?.id === item.id) {
-        setViewing(null);
-      }
+      if (viewing?.id === item.id) setViewing(null);
 
       if (editingId === item.id) {
         setEditingId(null);
@@ -636,10 +653,40 @@ function QuotationsPage() {
 
       await loadQuotations();
     } catch (err) {
-      setError(
-        getErrorMessage(err, "Quotation could not be deleted."),
-      );
+      setError(getErrorMessage(err, "Quotation could not be deleted."));
     }
+  }
+
+  function previewDraft() {
+    if (!validateForm()) return;
+
+    const existing = editingId
+      ? quotations.find((q) => q.id === editingId)
+      : undefined;
+
+    setPreview(
+      toDocData({
+        id: editingId ?? "draft",
+        quotationNo: existing?.quotationNo ?? "(Draft)",
+        customerId: form.customerId,
+        customerName: form.customerName,
+        customerAddress: form.customerAddress,
+        projectName: form.projectName,
+        estimateId: form.estimateId || null,
+        quotationDate: form.quotationDate,
+        validUntil: form.validUntil,
+        status: form.status,
+        gstRate: Number(form.gstRate) || 0,
+        placeOfSupply: form.placeOfSupply,
+        terms: form.termsText
+          .split("\n")
+          .map((t) => t.trim())
+          .filter(Boolean),
+        notes: form.notes,
+        items: form.items,
+        ...totals,
+      }),
+    );
   }
 
   return (
@@ -651,7 +698,7 @@ function QuotationsPage() {
               Quotation Management
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Create and manage customer quotations from Estimation / BOQ.
+              Create quotations from saved Estimates and download them as PDF.
             </p>
           </div>
 
@@ -741,6 +788,24 @@ function QuotationsPage() {
 
             <form onSubmit={submitForm} className="space-y-5">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <label className="space-y-1 text-sm md:col-span-3">
+                  <span>Estimate (निवडल्यावर सर्व items आपोआप भरतील)</span>
+                  <select
+                    className={inputClass}
+                    value={form.estimateId}
+                    onChange={(event) => selectEstimate(event.target.value)}
+                  >
+                    <option value="">Select Estimate (Optional)</option>
+                    {estimates.map((estimate) => (
+                      <option key={estimate.id} value={estimate.id}>
+                        {estimate.estimateNo} — {estimate.customerName}
+                        {estimate.projectName ? ` — ${estimate.projectName}` : ""}
+                        {estimate.total != null ? ` — ${money(estimate.total)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 <label className="space-y-1 text-sm">
                   <span>CRM Customer *</span>
                   <select
@@ -761,37 +826,21 @@ function QuotationsPage() {
                 </label>
 
                 <label className="space-y-1 text-sm">
-                  <span>Estimation / BOQ</span>
-                  <select
-                    className={inputClass}
-                    value={form.estimateId}
-                    onChange={(event) => selectEstimate(event.target.value)}
-                  >
-                    <option value="">Select Estimation (Optional)</option>
-                    {estimates.map((estimate) => (
-                      <option key={estimate.id} value={String(estimate.id)}>
-                        {estimate.estimationNumber ||
-                          estimate.estimateNo ||
-                          estimate.quotationNo ||
-                          `Estimate #${estimate.id}`}
-                        {estimate.projectName ? ` — ${estimate.projectName}` : ""}
-                        {estimate.totalSellingPrice != null
-                          ? ` — ${money(estimate.totalSellingPrice)}`
-                          : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="space-y-1 text-sm">
-                  <span>Customer Name *</span>
+                  <span>Quotation For (Customer Name) *</span>
                   <input
                     className={inputClass}
                     required
                     value={form.customerName}
-                    onChange={(event) =>
-                      setField("customerName", event.target.value)
-                    }
+                    onChange={(e) => setField("customerName", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Customer Address</span>
+                  <input
+                    className={inputClass}
+                    value={form.customerAddress}
+                    onChange={(e) => setField("customerAddress", e.target.value)}
                   />
                 </label>
 
@@ -801,9 +850,7 @@ function QuotationsPage() {
                     className={inputClass}
                     required
                     value={form.projectName}
-                    onChange={(event) =>
-                      setField("projectName", event.target.value)
-                    }
+                    onChange={(e) => setField("projectName", e.target.value)}
                     placeholder="Kitchen, wardrobe, workstation..."
                   />
                 </label>
@@ -815,9 +862,7 @@ function QuotationsPage() {
                     type="date"
                     required
                     value={form.quotationDate}
-                    onChange={(event) =>
-                      setField("quotationDate", event.target.value)
-                    }
+                    onChange={(e) => setField("quotationDate", e.target.value)}
                   />
                 </label>
 
@@ -828,9 +873,16 @@ function QuotationsPage() {
                     type="date"
                     min={form.quotationDate}
                     value={form.validUntil}
-                    onChange={(event) =>
-                      setField("validUntil", event.target.value)
-                    }
+                    onChange={(e) => setField("validUntil", e.target.value)}
+                  />
+                </label>
+
+                <label className="space-y-1 text-sm">
+                  <span>Place of Supply</span>
+                  <input
+                    className={inputClass}
+                    value={form.placeOfSupply}
+                    onChange={(e) => setField("placeOfSupply", e.target.value)}
                   />
                 </label>
 
@@ -839,9 +891,7 @@ function QuotationsPage() {
                   <select
                     className={inputClass}
                     value={form.status}
-                    onChange={(event) =>
-                      setField("status", event.target.value)
-                    }
+                    onChange={(e) => setField("status", e.target.value)}
                   >
                     <option>Draft</option>
                     <option>Sent</option>
@@ -860,9 +910,7 @@ function QuotationsPage() {
                     max="100"
                     step="any"
                     value={form.gstRate}
-                    onChange={(event) =>
-                      setField("gstRate", event.target.value)
-                    }
+                    onChange={(e) => setField("gstRate", e.target.value)}
                   />
                 </label>
               </div>
@@ -884,9 +932,7 @@ function QuotationsPage() {
                   {form.items.map((item, index) => (
                     <div key={item.id} className="rounded-lg border p-4">
                       <div className="mb-3 flex items-center justify-between">
-                        <h4 className="text-sm font-semibold">
-                          Item {index + 1}
-                        </h4>
+                        <h4 className="text-sm font-semibold">Item {index + 1}</h4>
 
                         <button
                           type="button"
@@ -899,37 +945,44 @@ function QuotationsPage() {
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                        <label className="space-y-1 text-sm xl:col-span-2">
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-12">
+                        <label className="col-span-2 space-y-1 text-xs md:col-span-4">
                           <span>Item Name *</span>
                           <input
                             className={inputClass}
                             required
                             value={item.itemName}
-                            onChange={(event) =>
-                              updateItem(item.id, "itemName", event.target.value)
+                            onChange={(e) =>
+                              updateItem(item.id, "itemName", e.target.value)
                             }
-                            placeholder="Wardrobe, workstation..."
                           />
                         </label>
 
-                        <label className="space-y-1 text-sm xl:col-span-2">
-                          <span>Description</span>
+                        <label className="space-y-1 text-xs md:col-span-1">
+                          <span>HSN/SAC</span>
                           <input
                             className={inputClass}
-                            value={item.description}
-                            onChange={(event) =>
-                              updateItem(
-                                item.id,
-                                "description",
-                                event.target.value,
-                              )
+                            value={item.hsn}
+                            onChange={(e) =>
+                              updateItem(item.id, "hsn", e.target.value)
                             }
                           />
                         </label>
 
-                        <label className="space-y-1 text-sm">
-                          <span>Quantity *</span>
+                        <label className="space-y-1 text-xs md:col-span-2">
+                          <span>Sizes</span>
+                          <input
+                            className={inputClass}
+                            value={item.sizes}
+                            placeholder="2400 X 1200"
+                            onChange={(e) =>
+                              updateItem(item.id, "sizes", e.target.value)
+                            }
+                          />
+                        </label>
+
+                        <label className="space-y-1 text-xs md:col-span-1">
+                          <span>Qty *</span>
                           <input
                             className={inputClass}
                             type="number"
@@ -937,35 +990,22 @@ function QuotationsPage() {
                             step="any"
                             required
                             value={item.quantity}
-                            onChange={(event) =>
-                              updateItem(
-                                item.id,
-                                "quantity",
-                                Number(event.target.value),
-                              )
+                            onChange={(e) =>
+                              updateItem(item.id, "quantity", Number(e.target.value))
                             }
                           />
                         </label>
 
-                        <label className="space-y-1 text-sm">
+                        <label className="space-y-1 text-xs md:col-span-1">
                           <span>Unit</span>
                           <select
                             className={inputClass}
                             value={item.unit}
-                            onChange={(event) =>
-                              updateItem(item.id, "unit", event.target.value)
+                            onChange={(e) =>
+                              updateItem(item.id, "unit", e.target.value)
                             }
                           >
-                            {[
-                              "NOS",
-                              "SQFT",
-                              "SQM",
-                              "RFT",
-                              "RMT",
-                              "SHEET",
-                              "KG",
-                              "SET",
-                            ].map((unit) => (
+                            {UNITS.map((unit) => (
                               <option key={unit} value={unit}>
                                 {unit}
                               </option>
@@ -973,8 +1013,8 @@ function QuotationsPage() {
                           </select>
                         </label>
 
-                        <label className="space-y-1 text-sm">
-                          <span>Rate (₹) *</span>
+                        <label className="col-span-2 space-y-1 text-xs md:col-span-3">
+                          <span>Price / Unit (₹) *</span>
                           <input
                             className={inputClass}
                             type="number"
@@ -982,51 +1022,74 @@ function QuotationsPage() {
                             step="any"
                             required
                             value={item.rate}
-                            onChange={(event) =>
-                              updateItem(
-                                item.id,
-                                "rate",
-                                Number(event.target.value),
-                              )
+                            onChange={(e) =>
+                              updateItem(item.id, "rate", Number(e.target.value))
                             }
                           />
                         </label>
-
-                        <div className="space-y-1 text-sm">
-                          <span className="block">Amount</span>
-                          <div className="rounded-lg bg-gray-50 px-3 py-2 font-semibold">
-                            {money(item.quantity * item.rate)}
-                          </div>
-                        </div>
                       </div>
+
+                      <label className="mt-3 block space-y-1 text-xs">
+                        <span>Description (PDF मध्ये कंसात दिसेल)</span>
+                        <textarea
+                          rows={2}
+                          className={inputClass}
+                          value={item.description}
+                          onChange={(e) =>
+                            updateItem(item.id, "description", e.target.value)
+                          }
+                        />
+                      </label>
+
+                      <p className="mt-1 text-right text-xs text-gray-500">
+                        Amount: {money(item.quantity * item.rate)}
+                      </p>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="ml-auto max-w-sm space-y-3 rounded-xl border bg-gray-50 p-4">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal</span>
-                  <strong>{money(totals.subtotal)}</strong>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>GST ({Number(form.gstRate) || 0}%)</span>
-                  <strong>{money(totals.gstAmount)}</strong>
-                </div>
-                <div className="flex justify-between border-t pt-3 text-lg">
-                  <strong>Grand Total</strong>
-                  <strong>{money(totals.grandTotal)}</strong>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="block space-y-1 text-sm">
+                  <span>Terms and conditions (प्रत्येक ओळ एक term)</span>
+                  <textarea
+                    className={inputClass}
+                    rows={7}
+                    value={form.termsText}
+                    onChange={(e) => setField("termsText", e.target.value)}
+                  />
+                </label>
+
+                <div className="space-y-2 rounded-xl border bg-gray-50 p-4 text-sm">
+                  <div className="flex justify-between">
+                    <span>Sub Total</span>
+                    <strong>{money(totals.subtotal)}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>GST ({Number(form.gstRate) || 0}%)</span>
+                    <strong>{money(totals.gstAmount)}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Round off</span>
+                    <strong>{money(totals.roundOff)}</strong>
+                  </div>
+                  <div className="flex justify-between border-t pt-2 text-lg">
+                    <strong>Grand Total</strong>
+                    <strong>{money(totals.grandTotal)}</strong>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {amountInWords(totals.grandTotal)}
+                  </p>
                 </div>
               </div>
 
               <label className="block space-y-1 text-sm">
-                <span>Notes / Terms and Conditions</span>
+                <span>Internal Notes</span>
                 <textarea
                   className={inputClass}
-                  rows={3}
+                  rows={2}
                   value={form.notes}
-                  onChange={(event) => setField("notes", event.target.value)}
-                  placeholder="Payment terms, delivery schedule, warranty..."
+                  onChange={(e) => setField("notes", e.target.value)}
                 />
               </label>
 
@@ -1041,6 +1104,15 @@ function QuotationsPage() {
                     : editingId
                       ? "Update Quotation"
                       : "Save Quotation"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={previewDraft}
+                  className="inline-flex items-center gap-2 rounded-lg border px-5 py-2 text-sm hover:bg-gray-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  Preview PDF
                 </button>
 
                 <button
@@ -1062,14 +1134,25 @@ function QuotationsPage() {
                 Quotation Details: {viewing.quotationNo}
               </h2>
 
-              <button
-                type="button"
-                onClick={() => setViewing(null)}
-                className="rounded p-2 hover:bg-gray-100"
-                aria-label="Close quotation details"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreview(toDocData(viewing))}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
+                >
+                  <FileText className="h-4 w-4" />
+                  View / Download PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setViewing(null)}
+                  className="rounded p-2 hover:bg-gray-100"
+                  aria-label="Close quotation details"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1080,14 +1163,17 @@ function QuotationsPage() {
               <p><strong>Valid Until:</strong> {viewing.validUntil || "—"}</p>
               <p><strong>Status:</strong> {viewing.status}</p>
               <p><strong>GST:</strong> {viewing.gstRate}%</p>
+              <p><strong>Place of Supply:</strong> {viewing.placeOfSupply}</p>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[600px] text-left text-sm">
+              <table className="w-full min-w-[700px] text-left text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="p-3">Item</th>
-                    <th className="p-3">Quantity</th>
+                    <th className="p-3">HSN</th>
+                    <th className="p-3">Sizes</th>
+                    <th className="p-3">Qty</th>
                     <th className="p-3">Unit</th>
                     <th className="p-3">Rate</th>
                     <th className="p-3">Amount</th>
@@ -1104,12 +1190,12 @@ function QuotationsPage() {
                           </div>
                         )}
                       </td>
+                      <td className="p-3">{item.hsn}</td>
+                      <td className="p-3">{item.sizes}</td>
                       <td className="p-3">{item.quantity}</td>
                       <td className="p-3">{item.unit}</td>
                       <td className="p-3">{money(item.rate)}</td>
-                      <td className="p-3">
-                        {money(item.quantity * item.rate)}
-                      </td>
+                      <td className="p-3">{money(item.quantity * item.rate)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1118,7 +1204,7 @@ function QuotationsPage() {
 
             <div className="ml-auto max-w-sm space-y-2 rounded-lg bg-gray-50 p-4">
               <div className="flex justify-between">
-                <span>Subtotal</span>
+                <span>Sub Total</span>
                 <strong>{money(viewing.subtotal)}</strong>
               </div>
               <div className="flex justify-between">
@@ -1130,12 +1216,6 @@ function QuotationsPage() {
                 <strong>{money(viewing.grandTotal)}</strong>
               </div>
             </div>
-
-            {viewing.notes && (
-              <p className="text-sm">
-                <strong>Notes:</strong> {viewing.notes}
-              </p>
-            )}
           </section>
         )}
 
@@ -1150,14 +1230,14 @@ function QuotationsPage() {
                   className={`${inputClass} pl-9 sm:w-64`}
                   placeholder="Search quotations..."
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
 
               <select
                 className={inputClass}
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
+                onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <option value="All">All Statuses</option>
                 <option value="Draft">Draft</option>
@@ -1170,13 +1250,9 @@ function QuotationsPage() {
           </div>
 
           {loading ? (
-            <p className="p-6 text-sm text-gray-500">
-              Loading quotations...
-            </p>
+            <p className="p-6 text-sm text-gray-500">Loading quotations...</p>
           ) : filteredQuotations.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">
-              No quotations found.
-            </p>
+            <p className="p-6 text-sm text-gray-500">No quotations found.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1000px] text-left text-sm">
@@ -1198,9 +1274,7 @@ function QuotationsPage() {
                       <td className="p-3">{item.customerName}</td>
                       <td className="p-3">{item.projectName || "—"}</td>
                       <td className="p-3">{item.quotationDate || "—"}</td>
-                      <td className="p-3 font-medium">
-                        {money(item.grandTotal)}
-                      </td>
+                      <td className="p-3 font-medium">{money(item.grandTotal)}</td>
                       <td className="p-3">
                         <span className="rounded-full bg-gray-100 px-2 py-1 text-xs">
                           {item.status}
@@ -1208,6 +1282,16 @@ function QuotationsPage() {
                       </td>
                       <td className="p-3">
                         <div className="flex gap-1">
+                          <button
+                            type="button"
+                            aria-label="Download quotation PDF"
+                            title="View / Download PDF"
+                            onClick={() => setPreview(toDocData(item))}
+                            className="rounded p-2 text-green-700 hover:bg-green-50"
+                          >
+                            <FileText className="h-4 w-4" />
+                          </button>
+
                           <button
                             type="button"
                             aria-label="View quotation"
@@ -1244,6 +1328,40 @@ function QuotationsPage() {
           )}
         </section>
       </div>
+
+      {preview &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="est-portal est-overlay"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 60,
+              background: "#e5e7eb",
+              overflow: "auto",
+              padding: 16,
+            }}
+          >
+            <style>{PRINT_FIX}</style>
+
+            <div
+              className="est-noprint"
+              style={{ textAlign: "center", marginBottom: 12 }}
+            >
+              <button
+                type="button"
+                onClick={() => setPreview(null)}
+                className="rounded-lg border border-gray-400 bg-white px-4 py-2 text-sm hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <EstimateDocument data={preview} title="Quotation" />
+          </div>,
+          document.body,
+        )}
     </AppShell>
   );
 }

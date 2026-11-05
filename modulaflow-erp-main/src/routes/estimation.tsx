@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { AppShell } from "@/components/erp/AppShell";
+import { EstimateBuilder } from "@/components/erp/EstimateBuilder";
 import { workstationBom } from "@/lib/erp/data";
 import {
   areaSqft,
@@ -1061,6 +1062,16 @@ function Estimation() {
             </button>
           </div>
         </form>
+
+        <EstimateBuilder
+          customer={selectedCustomer}
+          projectName={projectName}
+          panel={{
+            sizes: `${Math.round(calc.L)} X ${Math.round(calc.W)}`,
+            qty,
+            price: calc.sell,
+          }}
+        />
 
         <Panel title="6. Saved Estimations">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
