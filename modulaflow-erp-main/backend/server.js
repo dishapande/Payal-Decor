@@ -5173,6 +5173,302 @@ async function ensureInstallationTable() {
     console.error('❌ Could not create installation table:', error);
   }
 }
+// ======================================================
+// ESTIMATE DOCUMENT APIs (PDF-style multi-item estimate)
+// ======================================================
+
+// तुमचा शेवटचा वापरलेला estimate क्रमांक. पुढचा 045 येईल. गरजेनुसार बदला.
+const ESTIMATE_LAST_USED = 44;
+
+function fiscalYearLabel(date = new Date()) {
+  const start = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+  return `${start}-${String(start + 1).slice(-2)}`;
+}
+
+async function generateEstimateNo(date = new Date()) {
+  const prefix = `${fiscalYearLabel(date)}/`;
+
+  const existing = await prisma.estimateDocument.findMany({
+    where: { estimateNo: { startsWith: prefix } },
+    select: { estimateNo: true }
+  });
+
+  let max = ESTIMATE_LAST_USED;
+
+  for (const row of existing) {
+    const n = Number(row.estimateNo.slice(prefix.length));
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+
+  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+}
+
+function buildEstimateDoc(b) {
+  if (!String(b.customerName || '').trim()) {
+    throw new Error('Customer name is required');
+  }
+
+  if (!Array.isArray(b.items) || b.items.length === 0) {
+    throw new Error('Add at least one item');
+  }
+
+  const items = b.items.map((i) => {
+    const name = String(i.name || '').trim();
+    const qty = Number(i.qty);
+    const price = Number(i.price);
+
+    if (!name) throw new Error('Every item needs a name');
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error('Item quantity must be greater than zero');
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error('Item price cannot be negative');
+    }
+
+    return {
+      name,
+      description: String(i.description || '').trim(),
+      hsn: String(i.hsn || '').trim(),
+      sizes: String(i.sizes || '').trim(),
+      qty,
+      unit: String(i.unit || 'Nos').trim(),
+      price
+    };
+  });
+
+  const taxRate = Number(b.taxRate ?? 18);
+
+  if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+    throw new Error('Tax rate must be between 0 and 100');
+  }
+
+  const subTotal = items.reduce((s, i) => s + i.qty * i.price, 0);
+  const taxAmount = (subTotal * taxRate) / 100;
+  const raw = subTotal + taxAmount;
+  const total = Math.round(raw);
+
+  return {
+    customerId: b.customerId ? String(b.customerId) : null,
+    customerName: String(b.customerName).trim(),
+    customerAddress: String(b.customerAddress || '').trim() || null,
+    projectName: String(b.projectName || '').trim() || null,
+    placeOfSupply: String(b.placeOfSupply || '27-Maharashtra').trim(),
+    items,
+    taxRate,
+    subTotal,
+    taxAmount,
+    roundOff: total - raw,
+    total,
+    terms: Array.isArray(b.terms) ? b.terms.map(String) : null,
+    status: String(b.status || 'Draft')
+  };
+}
+
+app.get('/api/estimate-docs', async (req, res) => {
+  try {
+    const estimates = await prisma.estimateDocument.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json({ success: true, estimates });
+  } catch (error) {
+    console.error('❌ Get estimate docs error:', error);
+    res.status(500).json({ success: false, message: 'Failed to load estimates' });
+  }
+});
+
+app.post('/api/estimate-docs', async (req, res) => {
+  try {
+    const data = buildEstimateDoc(req.body || {});
+    const estimateDate = req.body.estimateDate
+      ? new Date(req.body.estimateDate)
+      : new Date();
+
+    const estimate = await prisma.estimateDocument.create({
+      data: {
+        estimateNo: await generateEstimateNo(estimateDate),
+        estimateDate,
+        ...data
+      }
+    });
+
+    res.status(201).json({ success: true, message: 'Estimate saved', estimate });
+  } catch (error) {
+    console.error('❌ Create estimate doc error:', error);
+
+    if (error.code === 'P2002') {
+      return res.status(409).json({
+        success: false,
+        message: 'Estimate number already exists. Please try again.'
+      });
+    }
+
+    res.status(error.code ? 500 : 400).json({
+      success: false,
+      message: error.message || 'Failed to save estimate'
+    });
+  }
+});
+
+app.put('/api/estimate-docs/:id', async (req, res) => {
+  try {
+    const existing = await prisma.estimateDocument.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Estimate not found' });
+    }
+
+    const data = buildEstimateDoc(req.body || {});
+
+    const estimate = await prisma.estimateDocument.update({
+      where: { id: req.params.id },
+      data: {
+        ...data,
+        ...(req.body.estimateDate
+          ? { estimateDate: new Date(req.body.estimateDate) }
+          : {})
+      }
+    });
+
+    res.json({ success: true, message: 'Estimate updated', estimate });
+  } catch (error) {
+    console.error('❌ Update estimate doc error:', error);
+    res.status(error.code ? 500 : 400).json({
+      success: false,
+      message: error.message || 'Failed to update estimate'
+    });
+  }
+});
+
+app.delete('/api/estimate-docs/:id', async (req, res) => {
+  try {
+    await prisma.estimateDocument.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'Estimate deleted' });
+  } catch (error) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ success: false, message: 'Estimate not found' });
+    }
+    console.error('❌ Delete estimate doc error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete estimate' });
+  }
+});
+
+// Render वर table नसेल तर बनवतो
+async function ensureEstimateDocTable() {
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "estimate_documents" (
+        "id" TEXT NOT NULL,
+        "estimateNo" TEXT NOT NULL,
+        "estimateDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "customerId" TEXT,
+        "customerName" TEXT NOT NULL,
+        "customerAddress" TEXT,
+        "projectName" TEXT,
+        "placeOfSupply" TEXT NOT NULL DEFAULT '27-Maharashtra',
+        "items" JSONB NOT NULL,
+        "taxRate" DOUBLE PRECISION NOT NULL DEFAULT 18,
+        "subTotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        "taxAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        "roundOff" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        "total" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        "terms" JSONB,
+        "status" TEXT NOT NULL DEFAULT 'Draft',
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL,
+        CONSTRAINT "estimate_documents_pkey" PRIMARY KEY ("id")
+      )
+    `);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "estimate_documents_estimateNo_key" ON "estimate_documents"("estimateNo")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "estimate_documents_customerId_idx" ON "estimate_documents"("customerId")`
+    );
+    console.log('✅ Estimate documents table is ready');
+  } catch (error) {
+    console.error('❌ Could not create estimate documents table:', error);
+  }
+}
+// ===================== INVOICES =====================
+function invoiceData(b) {
+  return {
+    invoiceNo: String(b.invoiceNo || "").trim(),
+    invoiceDate: String(b.invoiceDate || ""),
+    placeOfSupply: b.placeOfSupply || "27-Maharashtra",
+    ewayBill: b.ewayBill || null,
+    customerId: b.customerId ? String(b.customerId) : null,
+    billToName: String(b.billToName || "").trim(),
+    billToAddress: b.billToAddress || null,
+    billToContact: b.billToContact || null,
+    billToGstin: b.billToGstin || null,
+    billToState: b.billToState || null,
+    shipTo: b.shipTo || null,
+    interState: Boolean(b.interState),
+    invoiceDiscount: Number(b.invoiceDiscount) || 0,
+    freight: Number(b.freight) || 0,
+    advance: Number(b.advance) || 0,
+    status: b.status || "Draft",
+    items: Array.isArray(b.items) ? b.items : [],
+    taxable: Number(b.taxable) || 0,
+    grandTotal: Number(b.grandTotal) || 0,
+    balance: Number(b.balance) || 0,
+  };
+}
+
+app.get("/api/invoices", async (_req, res) => {
+  try {
+    const invoices = await prisma.invoice.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ success: true, invoices });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, message: "Invoices could not be loaded." });
+  }
+});
+
+app.post("/api/invoices", async (req, res) => {
+  try {
+    const invoice = await prisma.invoice.create({ data: invoiceData(req.body) });
+    res.json({ success: true, invoice });
+  } catch (e) {
+    console.error(e);
+    if (e.code === "P2002") {
+      return res.status(409).json({ success: false, message: "This invoice number already exists." });
+    }
+    res.status(500).json({ success: false, message: "Invoice could not be saved." });
+  }
+});
+
+app.put("/api/invoices/:id", async (req, res) => {
+  try {
+    const invoice = await prisma.invoice.update({
+      where: { id: req.params.id },
+      data: invoiceData(req.body),
+    });
+    res.json({ success: true, invoice });
+  } catch (e) {
+    console.error(e);
+    if (e.code === "P2002") {
+      return res.status(409).json({ success: false, message: "This invoice number already exists." });
+    }
+    res.status(500).json({ success: false, message: "Invoice could not be updated." });
+  }
+});
+
+app.delete("/api/invoices/:id", async (req, res) => {
+  try {
+    await prisma.invoice.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ success: false, message: "Invoice could not be deleted." });
+  }
+});
+
+/* ===== END ESTIMATE DOCUMENT APIs ===== */
 
 /* ===== END INSTALLATION APIs ===== */
 
@@ -5190,6 +5486,9 @@ async function ensureInstallationTable() {
 app.listen(PORT, () => {
   ensureDispatchTable();
 ensureInstallationTable();  
+ensureDispatchTable();
+ensureInstallationTable();
+ensureEstimateDocTable();  
   // ======================================================
 // DISPATCH TABLE: backend सुरू होताना table नसेल तर बनवतो
 // ======================================================

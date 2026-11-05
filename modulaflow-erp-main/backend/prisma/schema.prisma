@@ -445,3 +445,56 @@ model Installation {
   @@index([dispatchNo])
   @@map("installations")
 }
+model EstimateDocument {
+  id              String   @id @default(cuid())
+  estimateNo      String   @unique
+  estimateDate    DateTime @default(now())
+
+  customerId      String?
+  customerName    String
+  customerAddress String?
+  projectName     String?
+  placeOfSupply   String   @default("27-Maharashtra")
+
+  items     Json
+  taxRate   Float @default(18)
+  subTotal  Float @default(0)
+  taxAmount Float @default(0)
+  roundOff  Float @default(0)
+  total     Float @default(0)
+
+  terms  Json?
+  status String @default("Draft")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([estimateDate])
+  @@map("estimate_documents")
+}
+model Invoice {
+  id              String   @id @default(uuid())
+  invoiceNo       String   @unique
+  invoiceDate     String
+  placeOfSupply   String   @default("27-Maharashtra")
+  ewayBill        String?
+  customerId      String?
+  billToName      String
+  billToAddress   String?
+  billToContact   String?
+  billToGstin     String?
+  billToState     String?
+  shipTo          String?
+  interState      Boolean  @default(false)
+  invoiceDiscount Float    @default(0)
+  freight         Float    @default(0)
+  advance         Float    @default(0)
+  status          String   @default("Draft")
+  items           Json
+  taxable         Float    @default(0)
+  grandTotal      Float    @default(0)
+  balance         Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
