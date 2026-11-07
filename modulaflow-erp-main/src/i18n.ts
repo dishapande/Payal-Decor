@@ -7,6 +7,7 @@ const resources = {
     translation: {
       nav: {
         Dashboard: "डॅशबोर्ड",
+        Operations: "ऑपरेशन्स (दैनिक कार्य)",
         CRM: "सीआरएम",
         Projects: "प्रकल्प",
         "Estimation & BOQ": "अंदाज व BOQ",
@@ -92,6 +93,7 @@ const resources = {
     translation: {
       nav: {
         Dashboard: "डैशबोर्ड",
+        Operations: "ऑपरेशन्स (दैनिक कार्य)",
         CRM: "सीआरएम",
         Projects: "प्रोजेक्ट्स",
         "Estimation & BOQ": "अनुमान और BOQ",

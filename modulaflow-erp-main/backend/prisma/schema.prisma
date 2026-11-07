@@ -498,3 +498,26 @@ model Invoice {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
+
+model OperationTask {
+  id                  String    @id @default(cuid())
+  taskId              String    @unique
+  workstream          String
+  taskActivity        String
+  priority            String    @default("Medium")
+  primaryResponsible String
+  supportingRole      String?
+  expectedDeliverable String?
+  targetDate          DateTime?
+  status              String    @default("Pending")
+  remarks             String?
+  others              String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([taskId])
+  @@index([workstream])
+  @@index([status])
+  @@index([priority])
+  @@map("operation_tasks")
+}

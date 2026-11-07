@@ -24,6 +24,7 @@ import { Route as InvoicingRouteImport } from './routes/invoicing'
 import { Route as LeadEnquiryRouteImport } from './routes/lead-enquiry'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MastersRouteImport } from './routes/masters'
+import { Route as OperationsRouteImport } from './routes/operations'
 import { Route as PaymentsRouteImport } from './routes/payments'
 import { Route as ProductionRouteImport } from './routes/production'
 import { Route as ProjectsRouteImport } from './routes/projects'
@@ -115,6 +116,11 @@ const LoginRoute = LoginRouteImport.update({
 const MastersRoute = MastersRouteImport.update({
   id: '/masters',
   path: '/masters',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OperationsRoute = OperationsRouteImport.update({
+  id: '/operations',
+  path: '/operations',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PaymentsRoute = PaymentsRouteImport.update({
@@ -219,6 +225,7 @@ export interface FileRoutesByFullPath {
   '/lead-enquiry': typeof LeadEnquiryRoute
   '/login': typeof LoginRoute
   '/masters': typeof MastersRouteWithChildren
+  '/operations': typeof OperationsRoute
   '/payments': typeof PaymentsRoute
   '/production': typeof ProductionRoute
   '/projects': typeof ProjectsRoute
@@ -252,6 +259,7 @@ export interface FileRoutesByTo {
   '/lead-enquiry': typeof LeadEnquiryRoute
   '/login': typeof LoginRoute
   '/masters': typeof MastersRouteWithChildren
+  '/operations': typeof OperationsRoute
   '/payments': typeof PaymentsRoute
   '/production': typeof ProductionRoute
   '/projects': typeof ProjectsRoute
@@ -287,6 +295,7 @@ export interface FileRoutesById {
   '/lead-enquiry': typeof LeadEnquiryRoute
   '/login': typeof LoginRoute
   '/masters': typeof MastersRouteWithChildren
+  '/operations': typeof OperationsRoute
   '/payments': typeof PaymentsRoute
   '/production': typeof ProductionRoute
   '/projects': typeof ProjectsRoute
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/lead-enquiry'
     | '/login'
     | '/masters'
+    | '/operations'
     | '/payments'
     | '/production'
     | '/projects'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/lead-enquiry'
     | '/login'
     | '/masters'
+    | '/operations'
     | '/payments'
     | '/production'
     | '/projects'
@@ -390,6 +401,7 @@ export interface FileRouteTypes {
     | '/lead-enquiry'
     | '/login'
     | '/masters'
+    | '/operations'
     | '/payments'
     | '/production'
     | '/projects'
@@ -425,6 +437,7 @@ export interface RootRouteChildren {
   LeadEnquiryRoute: typeof LeadEnquiryRoute
   LoginRoute: typeof LoginRoute
   MastersRoute: typeof MastersRouteWithChildren
+  OperationsRoute: typeof OperationsRoute
   PaymentsRoute: typeof PaymentsRoute
   ProductionRoute: typeof ProductionRoute
   ProjectsRoute: typeof ProjectsRoute
@@ -542,6 +555,13 @@ declare module '@tanstack/react-router' {
       path: '/masters'
       fullPath: '/masters'
       preLoaderRoute: typeof MastersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/operations': {
+      id: '/operations'
+      path: '/operations'
+      fullPath: '/operations'
+      preLoaderRoute: typeof OperationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/payments': {
@@ -713,6 +733,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeadEnquiryRoute: LeadEnquiryRoute,
   LoginRoute: LoginRoute,
   MastersRoute: MastersRouteWithChildren,
+  OperationsRoute: OperationsRoute,
   PaymentsRoute: PaymentsRoute,
   ProductionRoute: ProductionRoute,
   ProjectsRoute: ProjectsRoute,

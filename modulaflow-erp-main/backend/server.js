@@ -5468,6 +5468,200 @@ app.delete("/api/invoices/:id", async (req, res) => {
   }
 });
 
+
+/* ====================================================== */
+/* OPERATIONS MODULE: DAILY TASK & EXECUTION TRACKER APIs */
+/* ====================================================== */
+
+async function generateNextTaskId() {
+  try {
+    const existing = await prisma.operationTask.findMany({
+      select: { taskId: true }
+    });
+
+    let maxNum = 0;
+    for (const item of existing) {
+      if (item.taskId && item.taskId.startsWith('PD-')) {
+        const numPart = parseInt(item.taskId.replace(/^PD-/, ''), 10);
+        if (!isNaN(numPart) && numPart > maxNum) {
+          maxNum = numPart;
+        }
+      }
+    }
+    return 'PD-' + String(maxNum + 1).padStart(3, '0');
+  } catch (e) {
+    return 'PD-001';
+  }
+}
+
+// GET all operations tasks
+app.get('/api/operations', async (req, res) => {
+  try {
+    const tasks = await prisma.operationTask.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json({ success: true, tasks });
+  } catch (error) {
+    console.error('❌ Get operations tasks error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load operations tasks',
+      details: error.message
+    });
+  }
+});
+
+// GET single operation task
+app.get('/api/operations/:id', async (req, res) => {
+  try {
+    const task = await prisma.operationTask.findUnique({
+      where: { id: req.params.id }
+    });
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found' });
+    }
+    res.json({ success: true, task });
+  } catch (error) {
+    console.error('❌ Get operation task error:', error);
+    res.status(500).json({ success: false, message: 'Failed to load task', details: error.message });
+  }
+});
+
+// CREATE operation task
+app.post('/api/operations', async (req, res) => {
+  try {
+    const b = req.body;
+    let taskId = (b.taskId || '').trim();
+    if (!taskId) {
+      taskId = await generateNextTaskId();
+    }
+
+    const newTask = await prisma.operationTask.create({
+      data: {
+        taskId,
+        workstream: (b.workstream || 'General').trim(),
+        taskActivity: (b.taskActivity || '').trim(),
+        priority: b.priority || 'Medium',
+        primaryResponsible: (b.primaryResponsible || '').trim(),
+        supportingRole: (b.supportingRole || '').trim() || null,
+        expectedDeliverable: (b.expectedDeliverable || '').trim() || null,
+        targetDate: b.targetDate ? new Date(b.targetDate) : null,
+        status: b.status || 'Pending',
+        remarks: (b.remarks || '').trim() || null,
+        others: (b.others || '').trim() || null,
+      }
+    });
+
+    res.status(201).json({ success: true, task: newTask });
+  } catch (error) {
+    console.error('❌ Create operation task error:', error);
+    if (error.code === 'P2002') {
+      return res.status(409).json({ success: false, message: 'Task ID already exists.' });
+    }
+    res.status(500).json({ success: false, message: 'Failed to create task', details: error.message });
+  }
+});
+
+// UPDATE operation task
+app.put('/api/operations/:id', async (req, res) => {
+  try {
+    const b = req.body;
+    const updated = await prisma.operationTask.update({
+      where: { id: req.params.id },
+      data: {
+        taskId: b.taskId ? b.taskId.trim() : undefined,
+        workstream: b.workstream ? b.workstream.trim() : undefined,
+        taskActivity: b.taskActivity ? b.taskActivity.trim() : undefined,
+        priority: b.priority || undefined,
+        primaryResponsible: b.primaryResponsible ? b.primaryResponsible.trim() : undefined,
+        supportingRole: b.supportingRole !== undefined ? (b.supportingRole || '').trim() || null : undefined,
+        expectedDeliverable: b.expectedDeliverable !== undefined ? (b.expectedDeliverable || '').trim() || null : undefined,
+        targetDate: b.targetDate !== undefined ? (b.targetDate ? new Date(b.targetDate) : null) : undefined,
+        status: b.status || undefined,
+        remarks: b.remarks !== undefined ? (b.remarks || '').trim() || null : undefined,
+        others: b.others !== undefined ? (b.others || '').trim() || null : undefined,
+      }
+    });
+
+    res.json({ success: true, task: updated });
+  } catch (error) {
+    console.error('❌ Update operation task error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update task', details: error.message });
+  }
+});
+
+// PATCH status
+app.patch('/api/operations/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status) {
+      return res.status(400).json({ success: false, message: 'Status is required' });
+    }
+    const updated = await prisma.operationTask.update({
+      where: { id: req.params.id },
+      data: { status }
+    });
+    res.json({ success: true, task: updated });
+  } catch (error) {
+    console.error('❌ Patch operation task status error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update status', details: error.message });
+  }
+});
+
+// DELETE operation task
+app.delete('/api/operations/:id', async (req, res) => {
+  try {
+    await prisma.operationTask.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true, message: 'Task deleted successfully' });
+  } catch (error) {
+    console.error('❌ Delete operation task error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete task', details: error.message });
+  }
+});
+
+async function ensureOperationsTaskTable() {
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "operation_tasks" (
+        "id" TEXT NOT NULL,
+        "taskId" TEXT NOT NULL,
+        "workstream" TEXT NOT NULL,
+        "taskActivity" TEXT NOT NULL,
+        "priority" TEXT NOT NULL DEFAULT 'Medium',
+        "primaryResponsible" TEXT NOT NULL,
+        "supportingRole" TEXT,
+        "expectedDeliverable" TEXT,
+        "targetDate" TIMESTAMP(3),
+        "status" TEXT NOT NULL DEFAULT 'Pending',
+        "remarks" TEXT,
+        "others" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "operation_tasks_pkey" PRIMARY KEY ("id")
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "operation_tasks_taskId_key" ON "operation_tasks"("taskId")'
+    );
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX IF NOT EXISTS "operation_tasks_workstream_idx" ON "operation_tasks"("workstream")'
+    );
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX IF NOT EXISTS "operation_tasks_status_idx" ON "operation_tasks"("status")'
+    );
+    await prisma.$executeRawUnsafe(
+      'CREATE INDEX IF NOT EXISTS "operation_tasks_priority_idx" ON "operation_tasks"("priority")'
+    );
+
+    console.log('✅ Operation Tasks table is ready');
+  } catch (error) {
+    console.error('❌ Could not create operation_tasks table:', error);
+  }
+}
+
 /* ===== END ESTIMATE DOCUMENT APIs ===== */
 
 /* ===== END INSTALLATION APIs ===== */
@@ -5485,6 +5679,7 @@ app.delete("/api/invoices/:id", async (req, res) => {
 // ============================================
 app.listen(PORT, () => {
   ensureDispatchTable();
+  ensureOperationsTaskTable();
 ensureInstallationTable();  
 ensureDispatchTable();
 ensureInstallationTable();
