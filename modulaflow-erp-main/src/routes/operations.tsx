@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Search,
@@ -8,19 +8,33 @@ import {
   X,
   RefreshCw,
   Eye,
+  EyeOff,
   CheckCircle2,
   Clock,
   AlertTriangle,
   Layers,
   Calendar,
   Download,
+  Upload,
   CheckSquare,
   Users2,
+  UserPlus,
+  User,
+  ShieldCheck,
+  Lock,
   Target,
   AlertCircle,
   PauseCircle,
+  FileSpreadsheet,
+  Briefcase,
+  Check,
+  LogIn,
+  LogOut,
+  KeyRound,
+  UserCheck,
 } from "lucide-react";
 import { AppShell } from "@/components/erp/AppShell";
+import { loginAdmin, loginEmployee, getCurrentUser } from "@/lib/auth";
 
 export const Route = createFileRoute("/operations")({
   component: OperationsPage,
@@ -40,12 +54,30 @@ export type TaskStatus =
   | "Pending"
   | "Under Review";
 
+export interface Employee {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  department: string;
+  phone?: string;
+  avatarColor?: string;
+}
+
+export interface AuthSession {
+  name: string;
+  email: string;
+  role: string;
+  isAdmin: boolean;
+}
+
 export interface OperationTask {
   id: string;
   taskId: string; // Format: PD-001, PD-002, PD-003, etc.
   workstream: string;
   taskActivity: string;
   priority: PriorityLevel;
+  employee: string; // "Disha" | "Sairaj" | "Saniya"
   primaryResponsible: string;
   supportingRole: string;
   expectedDeliverable: string;
@@ -58,6 +90,7 @@ export interface OperationTask {
 }
 
 export const WORKSTREAM_OPTIONS = [
+  "Software / Operation",
   "Software & Operations",
   "Data & Documentation",
   "Business Development",
@@ -101,9 +134,52 @@ export const PRIORITY_OPTIONS: PriorityLevel[] = [
   "Low",
 ];
 
-const LOCAL_STORAGE_KEY = "payal_decor_operations_tasks_v4";
+const LOCAL_STORAGE_KEY = "payal_decor_operations_tasks_v10";
+const EMPLOYEES_STORAGE_KEY = "payal_decor_employees_v4";
+const AUTH_STORAGE_KEY = "payal_decor_operations_auth_user_v4";
 
-// Exact dataset transcribed from the Payal Decor Daily Task & Execution Tracker PDF (PD-001 to PD-045)
+// Configured employees: Disha, Gaurav (Project Manager), Sairaj, and Saniya
+export const INITIAL_EMPLOYEES: Employee[] = [
+  {
+    id: "emp-disha",
+    name: "Disha",
+    email: "disha@payaldecor.com",
+    role: "Software Developer",
+    department: "Software & Operations",
+    phone: "+91 98765 43210",
+    avatarColor: "bg-purple-100 text-purple-700 border-purple-200",
+  },
+  {
+    id: "emp-gaurav",
+    name: "Gaurav",
+    email: "gaurav@payaldecor.com",
+    role: "Project Manager",
+    department: "Operations & Project Control",
+    phone: "+91 98765 43213",
+    avatarColor: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  },
+  {
+    id: "emp-sairaj",
+    name: "Sairaj",
+    email: "sairaj@payaldecor.com",
+    role: "Operations & Production Lead",
+    department: "Operations & Project Control",
+    phone: "+91 98765 43211",
+    avatarColor: "bg-blue-100 text-blue-700 border-blue-200",
+  },
+  {
+    id: "emp-saniya",
+    name: "Saniya",
+    email: "saniya@payaldecor.com",
+    role: "Design & Documentation Lead",
+    department: "Data & Documentation",
+    phone: "+91 98765 43212",
+    avatarColor: "bg-pink-100 text-pink-700 border-pink-200",
+  },
+];
+
+// Exact dataset transcribed from Payal Decor Daily Task & Execution Tracker (PD-001 to PD-050)
+// Configured strictly across Disha, Gaurav, Sairaj, and Saniya
 export const PDF_TASKS_DATA: OperationTask[] = [
   {
     id: "pd-001",
@@ -111,6 +187,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software & Operations",
     taskActivity: "Create the Operations tab in the existing software",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Operations tab structure, fields and workflow agreed and implemented",
@@ -125,6 +202,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software & Operations",
     taskActivity: "Map end-to-end business workflow and module requirements",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Approved workflow covering enquiry through project closure",
@@ -139,6 +217,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software & Operations",
     taskActivity: "Define lead, client, quotation, invoice and payment workflows",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Module-wise requirements and process flow documented",
@@ -153,6 +232,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software & Operations",
     taskActivity: "Define project, task, employee and daily reporting workflows",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Task allocation, ownership, status and reporting requirements documented",
@@ -167,6 +247,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software & Operations",
     taskActivity: "Prepare software development plan and testing checklist",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Milestones, owners, test cases and delivery dates published",
@@ -181,6 +262,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Data & Documentation",
     taskActivity: "Collect company details, services, projects, client and vendor information",
     priority: "High",
+    employee: "Saniya",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Verified central data sheet with missing information flagged",
@@ -195,6 +277,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Data & Documentation",
     taskActivity: "Collect machinery list, specifications, capacity and photographs",
     priority: "High",
+    employee: "Saniya",
     primaryResponsible: "Project Manager",
     supportingRole: "Website Developer",
     expectedDeliverable: "Machinery register with specifications and usable images",
@@ -209,6 +292,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Business Development",
     taskActivity: "Build a prospect list of architects and interior design companies",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Target list with company, contact person, phone/email, location and source",
@@ -223,6 +307,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Business Development",
     taskActivity: "Contact architects and introduce Payal Decor services",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Outreach logged; response and next follow-up date recorded",
@@ -237,6 +322,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Business Development",
     taskActivity: "Contact interior design companies for collaboration opportunities",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Outreach log and interested prospects list",
@@ -251,6 +337,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Business Development",
     taskActivity: "Identify builders, contractors and referral partners",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "At least 5 relevant prospects added with next action",
@@ -265,6 +352,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Company Profile",
     taskActivity: "Revise company profile and update service portfolio",
     priority: "High",
+    employee: "Saniya",
     primaryResponsible: "Digital Marketing",
     supportingRole: "Project Manager",
     expectedDeliverable: "Updated company overview, services, strengths and contact details",
@@ -279,6 +367,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Company Profile",
     taskActivity: "Add machinery, infrastructure and technical capabilities to profile",
     priority: "High",
+    employee: "Saniya",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Verified machinery section with specifications and photographs",
@@ -293,6 +382,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Company Profile",
     taskActivity: "Compile project photographs and create a client-ready portfolio",
     priority: "Medium",
+    employee: "Saniya",
     primaryResponsible: "Digital Marketing",
     supportingRole: "Website Developer",
     expectedDeliverable: "Organised project gallery with approved captions and images",
@@ -307,6 +397,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Resource Allocation",
     taskActivity: "Assign two dedicated software resources and confirm responsibilities",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Two named resources, ownership split and availability confirmed",
@@ -321,6 +412,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Business Automation",
     taskActivity: "Prepare the full business automation roadmap",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Prioritised roadmap for CRM, quotations, invoices, projects, inventory, purchase, vendors, machinery and reports",
@@ -335,6 +427,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Marketing",
     taskActivity: "Create a distinctive, premium Dhanteras creative",
     priority: "Medium",
+    employee: "Saniya",
     primaryResponsible: "Digital Marketing",
     supportingRole: "Project Manager",
     expectedDeliverable: "Approved creative, caption and platform-ready formats",
@@ -349,6 +442,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Website",
     taskActivity: "Audit the complete website for errors and missing content",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Website Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Audit list covering broken links, forms, mobile responsiveness, content and speed",
@@ -363,6 +457,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Website",
     taskActivity: "Fix high-priority website errors and test enquiry journey",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Website Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Critical fixes completed; contact/enquiry forms tested",
@@ -377,6 +472,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Reporting & Governance",
     taskActivity: "Collect end-of-day updates from every role and consolidate report",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "All Roles",
     expectedDeliverable: "Completed, in-progress, pending, blockers and next-day plan submitted",
@@ -391,6 +487,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Business Development",
     taskActivity: "Maintain follow-up tracker for all prospects and enquiries",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Every prospect has owner, status, last contact and next follow-up date",
@@ -405,6 +502,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Review the supplied reference PDF and prepare a module-by-module invoice requirements checklist",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "PDF reviewed; required screens, fields, calculations, print layouts and approval points documented",
@@ -419,6 +517,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Study the requested Vyapar-style billing workflow and map the equivalent Payal Decor workflow",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Workflow documented for customer selection, item entry, tax/discount, totals, payment and invoice sharing",
@@ -433,6 +532,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Create and configure customer/client master with client name and contact details",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Client name, phone, email, billing address, GSTIN where applicable and saved customer history available",
@@ -447,6 +547,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Create item/product master with unique item number or item code",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Each item has unique item number/code, item name/description and searchable selection",
@@ -461,6 +562,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Add item-wise size/dimension, unit, quantity, rate and amount fields",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Invoice line supports size/dimensions, unit, quantity, rate and auto-calculated line amount",
@@ -475,6 +577,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Configure invoice number, invoice date, due date and payment terms",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Unique invoice numbering, dates and payment terms work correctly",
@@ -489,6 +592,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Configure discount, taxes/GST, subtotal, round-off and grand total calculations",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Calculations tested with approved tax rules and sample invoices",
@@ -503,6 +607,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Add payment tracking: paid, partially paid, balance due and payment mode",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Payment entries update outstanding balance and payment status accurately",
@@ -517,6 +622,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Create professional invoice PDF/print template with company details and terms",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Digital Marketing",
     expectedDeliverable: "Branded invoice output is readable, accurate and ready to print/share",
@@ -531,6 +637,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Add invoice actions: save draft, edit, approve/finalise, print, download and share",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Authorised users can complete the invoice lifecycle with audit trail",
@@ -545,6 +652,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Link invoices to client records, quotations and projects where applicable",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Invoice is traceable to client and relevant quotation/project",
@@ -559,6 +667,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Invoice & Billing Module",
     taskActivity: "Test invoice calculations and output using management-approved sample cases",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Test cases cover multiple items, sizes, quantities, discounts, taxes, partial payments and edits",
@@ -573,6 +682,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "User Accounts & Access",
     taskActivity: "Create employee login accounts for all active team members",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Named employee accounts created; initial access details shared securely",
@@ -587,6 +697,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "User Accounts & Access",
     taskActivity: "Configure role-based access for Project Manager, Website Developer, Software Developer and Digital Marketing",
     priority: "Critical",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Each role sees only the modules and actions needed for their work",
@@ -601,6 +712,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "User Accounts & Access",
     taskActivity: "Set up employee profiles, department, reporting manager and active status",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Employee directory is complete and linked to role permissions",
@@ -615,6 +727,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "User Accounts & Access",
     taskActivity: "Test login, password reset, account activation and access permissions",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Each role can log in and access the correct modules; unauthorised access is blocked",
@@ -629,6 +742,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software Rollout & Adoption",
     taskActivity: "Make the software the official system for daily task, lead, project and invoice updates",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "All Roles",
     expectedDeliverable: "Team instructed to record all relevant work in the software from rollout date",
@@ -643,6 +757,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software Rollout & Adoption",
     taskActivity: "Conduct role-wise software onboarding and practical training",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Each employee completes a basic task in their assigned module",
@@ -657,6 +772,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software Rollout & Adoption",
     taskActivity: "Prepare user guide/SOP and issue reporting process",
     priority: "Medium",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Short SOP covers login, task updates, lead entry, invoice flow and support escalation",
@@ -671,6 +787,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software Rollout & Adoption",
     taskActivity: "Set up data backup, access review and change/audit history requirements",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Backup approach, permission review and change tracking documented and tested",
@@ -685,6 +802,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Operations & Project Control",
     taskActivity: "Define project stages, handover checklist, site measurements and approval checkpoints",
     priority: "High",
+    employee: "Sairaj",
     primaryResponsible: "Project Manager",
     supportingRole: "Website Developer",
     expectedDeliverable: "Standard project stages and required client/site information documented",
@@ -699,6 +817,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Operations & Project Control",
     taskActivity: "Add purchase, vendor, material issue/return and inventory movement requirements",
     priority: "High",
+    employee: "Sairaj",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Material and vendor workflow mapped, including stock movement and accountability",
@@ -713,6 +832,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Operations & Project Control",
     taskActivity: "Define machinery register, maintenance schedule and downtime reporting",
     priority: "Medium",
+    employee: "Sairaj",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer",
     expectedDeliverable: "Machinery details, service dates and downtime can be recorded and reviewed",
@@ -727,6 +847,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Quality Assurance & Sign-off",
     taskActivity: "Run end-to-end acceptance testing across lead, quotation, invoice, project and reporting modules",
     priority: "Critical",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "Software Developer; Website Developer",
     expectedDeliverable: "Management-approved test checklist passed; critical defects closed before full rollout",
@@ -741,6 +862,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Quality Assurance & Sign-off",
     taskActivity: "Obtain management sign-off and publish software rollout instructions",
     priority: "High",
+    employee: "Gaurav",
     primaryResponsible: "Project Manager",
     supportingRole: "All Roles",
     expectedDeliverable: "Approved release checklist, owner list and rollout communication completed",
@@ -755,6 +877,7 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     workstream: "Software & Operations",
     taskActivity: "Fix non-working UI and Button logic",
     priority: "High",
+    employee: "Disha",
     primaryResponsible: "Software Developer",
     supportingRole: "Project Manager",
     expectedDeliverable: "Improve the UI and fix non working buttons and logic",
@@ -763,9 +886,53 @@ export const PDF_TASKS_DATA: OperationTask[] = [
     remarks: "On time completed",
     others: "",
   },
+  {
+    id: "pd-048",
+    taskId: "PD-048",
+    workstream: "Software / Operation",
+    taskActivity: "Improvement of the operations Tab",
+    priority: "Low",
+    employee: "Disha",
+    primaryResponsible: "Software Developer",
+    supportingRole: "Project Manager",
+    expectedDeliverable: "Improve Bussiness side operations and software side.",
+    targetDate: "2026-11-10",
+    status: "In Progress",
+    remarks: "Assigned to Disha",
+    others: "",
+  },
+  {
+    id: "pd-049",
+    taskId: "PD-049",
+    workstream: "Software / Operation",
+    taskActivity: "Website aligment issue",
+    priority: "Medium",
+    employee: "Sairaj",
+    primaryResponsible: "Website Developer",
+    supportingRole: "Project Manager",
+    expectedDeliverable: "Alinment of elements",
+    targetDate: "2026-11-10",
+    status: "Completed",
+    remarks: "Assigned to Sairaj",
+    others: "",
+  },
+  {
+    id: "pd-050",
+    taskId: "PD-050",
+    workstream: "Software / Operation",
+    taskActivity: "Website SEO and keyword",
+    priority: "High",
+    employee: "Sairaj",
+    primaryResponsible: "Website Developer",
+    supportingRole: "Project Manager",
+    expectedDeliverable: "Making website visible, Improve keywording.",
+    targetDate: "2026-11-10",
+    status: "In Progress",
+    remarks: "Assigned to Sairaj",
+    others: "",
+  },
 ];
 
-// Helper to calculate next PD-001, PD-002, PD-003 Task ID
 export function getNextTaskId(tasks: OperationTask[]): string {
   let maxNumber = 0;
   for (const t of tasks) {
@@ -779,11 +946,12 @@ export function getNextTaskId(tasks: OperationTask[]): string {
   return `PD-${String(maxNumber + 1).padStart(3, "0")}`;
 }
 
-const emptyFormData = (autoId: string = "PD-001") => ({
+const emptyFormData = (autoId: string = "PD-001", defaultEmployee: string = "Disha") => ({
   taskId: autoId,
   workstream: "Software & Operations",
   taskActivity: "",
   priority: "High" as PriorityLevel,
+  employee: defaultEmployee,
   primaryResponsible: "",
   supportingRole: "",
   expectedDeliverable: "",
@@ -807,6 +975,7 @@ function formatDateDisplay(val: string) {
 function getWorkstreamBadgeColor(ws: string) {
   switch (ws) {
     case "Software & Operations":
+    case "Software / Operation":
       return "bg-violet-100 text-violet-800 border-violet-200";
     case "Data & Documentation":
       return "bg-teal-100 text-teal-800 border-teal-200";
@@ -940,56 +1109,257 @@ function getStatusBadge(status: TaskStatus) {
 
 function OperationsPage() {
   const [tasks, setTasks] = useState<OperationTask[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
   const [loading, setLoading] = useState(true);
+
+  // Search & Filters
   const [search, setSearch] = useState("");
   const [workstreamFilter, setWorkstreamFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
 
+  // ============================================================
+  // SECURE AUTHENTICATION VIA EMAIL AND NAME (AS REQUESTED)
+  // An employee must log in via Email and Name.
+  // Once logged in (e.g. as Disha), only Disha's tasks are visible!
+  // Anyone without logging in as another employee cannot see their tasks!
+  // ============================================================
+  const [currentSession, setCurrentSession] = useState<AuthSession>(() => {
+    try {
+      const authUser = getCurrentUser();
+      if (authUser) {
+        return {
+          name: authUser.name,
+          email: authUser.email,
+          role: authUser.role,
+          isAdmin: authUser.isAdmin,
+        };
+      }
+      const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.email && parsed.name) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    // Default logged in user: Admin (full visibility across all 50 tasks)
+    return {
+      name: "Admin",
+      email: "admin@payaldecor.com",
+      role: "System Administrator",
+      isAdmin: true,
+    };
+  });
+
+  // Login Modal State (Supports Admin & Individual Employee with own passwords)
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [modalLoginRole, setModalLoginRole] = useState<"admin" | "employee">("employee");
+  const [modalAdminId, setModalAdminId] = useState("admin");
+  const [modalEmployeeId, setModalEmployeeId] = useState("gaurav");
+  const [modalPassword, setModalPassword] = useState("");
+  const [showModalPassword, setShowModalPassword] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   // Modal / Form state
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingTask, setViewingTask] = useState<OperationTask | null>(null);
-  const [form, setForm] = useState(emptyFormData("PD-001"));
+  const [form, setForm] = useState(emptyFormData("PD-001", currentSession.name));
   const [saving, setSaving] = useState(false);
+
+  // Import Modal state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importMode, setImportMode] = useState<"append" | "replace">("append");
+  const [importParsedCount, setImportParsedCount] = useState<number | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Add Employee Modal state
+  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
+  const [newEmpName, setNewEmpName] = useState("");
+  const [newEmpRole, setNewEmpRole] = useState("Software Developer");
+  const [newEmpDept, setNewEmpDept] = useState("Software & Operations");
+  const [newEmpEmail, setNewEmpEmail] = useState("");
+  const [newEmpPhone, setNewEmpPhone] = useState("");
+
   const [feedbackMsg, setFeedbackMsg] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
 
-  // Load tasks: Preserve user's PD-001 if already filled, and populate PD-002 to PD-045 from PDF
+  // Save authentication session
+  const saveAuthSession = (session: AuthSession) => {
+    setCurrentSession(session);
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+    } catch {
+      // ignore
+    }
+  };
+
+  // Perform Login with Password Verification
+  const handlePerformLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+
+    if (modalLoginRole === "admin") {
+      if (!modalAdminId.trim() || !modalPassword) {
+        setLoginError("Please enter your Admin ID and password.");
+        return;
+      }
+      const res = loginAdmin(modalAdminId, modalPassword);
+      if (!res.success) {
+        setLoginError(res.error || "Admin ID or password is incorrect.");
+        return;
+      }
+      const adminSession: AuthSession = {
+        name: "Admin",
+        email: "admin@payaldecor.com",
+        role: "System Administrator",
+        isAdmin: true,
+      };
+      saveAuthSession(adminSession);
+      setShowLoginModal(false);
+      setModalPassword("");
+      setFeedbackMsg({
+        type: "success",
+        text: "Logged in as Administrator (Unrestricted View across all 50 tasks).",
+      });
+    } else {
+      if (!modalEmployeeId || !modalPassword) {
+        setLoginError("Please select your employee profile and enter your password.");
+        return;
+      }
+      const res = loginEmployee(modalEmployeeId, modalPassword);
+      if (!res.success) {
+        setLoginError(res.error || "Incorrect employee password.");
+        return;
+      }
+      if (res.user) {
+        const empSession: AuthSession = {
+          name: res.user.name,
+          email: res.user.email,
+          role: res.user.role,
+          isAdmin: false,
+        };
+        saveAuthSession(empSession);
+        setShowLoginModal(false);
+        setModalPassword("");
+        setFeedbackMsg({
+          type: "success",
+          text: `Welcome back, ${res.user.name}! Showing only your assigned tasks.`,
+        });
+      }
+    }
+  };
+
+  // Log Out / Clear Session
+  const handleLogout = () => {
+    setModalPassword("");
+    setLoginError(null);
+    setShowLoginModal(true);
+  };
+
+  // Load employees from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(EMPLOYEES_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Keep only Disha, Sairaj, Saniya as base, plus any custom user-added
+          const baseNames = new Set(INITIAL_EMPLOYEES.map((e) => e.name.toLowerCase()));
+          const userAdded = parsed.filter(
+            (e: Employee) =>
+              !baseNames.has(e.name.toLowerCase()) &&
+              !["rahul pawar", "sneha patil", "pooja kulkarni", "amit sharma", "vikram singh"].includes(
+                e.name.toLowerCase()
+              )
+          );
+          setEmployees([...INITIAL_EMPLOYEES, ...userAdded]);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setEmployees(INITIAL_EMPLOYEES);
+  }, []);
+
+  // Persist employees
+  const persistEmployees = (list: Employee[]) => {
+    setEmployees(list);
+    try {
+      localStorage.setItem(EMPLOYEES_STORAGE_KEY, JSON.stringify(list));
+    } catch {
+      // ignore
+    }
+  };
+
+  // Load tasks: Preserve user's PD-001 to PD-047 with employee assignments
   const loadTasks = useCallback(async () => {
     setLoading(true);
 
     let initialList = [...PDF_TASKS_DATA];
 
     try {
-      // Check if user already had saved tasks in localStorage
       const stored =
         localStorage.getItem(LOCAL_STORAGE_KEY) ||
-        localStorage.getItem("payal_decor_operations_tasks_v2") ||
-        localStorage.getItem("payal_decor_operations_tasks_v1");
+        localStorage.getItem("payal_decor_operations_tasks_v8") ||
+        localStorage.getItem("payal_decor_operations_tasks_v7");
 
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Find if user already filled/customized PD-001
-          const userPd001 = parsed.find(
-            (t: any) => String(t.taskId || "").toUpperCase() === "PD-001"
-          );
+          // Remap any old names to Disha, Gaurav, Sairaj, Saniya
+          const updatedWithCleanEmployees = parsed.map((item: any) => {
+            if (item.taskId === "PD-048")
+              return { ...item, employee: "Disha", remarks: item.remarks || "Assigned to Disha" };
+            if (item.taskId === "PD-049")
+              return { ...item, employee: "Sairaj", remarks: item.remarks || "Assigned to Sairaj" };
+            if (item.taskId === "PD-050")
+              return { ...item, employee: "Sairaj", remarks: item.remarks || "Assigned to Sairaj" };
+            const rawEmp = String(item.employee || "").trim().toLowerCase();
+            if (rawEmp.includes("disha")) return { ...item, employee: "Disha" };
+            if (rawEmp.includes("gaurav")) return { ...item, employee: "Gaurav" };
+            if (rawEmp.includes("sairaj")) return { ...item, employee: "Sairaj" };
+            if (rawEmp.includes("saniya")) return { ...item, employee: "Saniya" };
 
-          if (userPd001) {
-            // Keep user's PD-001 and ensure PD-002 through PD-047 from PDF follow it
-            const restOfPdf = PDF_TASKS_DATA.filter((t) => t.taskId !== "PD-001");
-            initialList = [userPd001, ...restOfPdf];
-          } else {
-            // Merge custom user tasks with PDF data
-            const existingIds = new Set(parsed.map((p: any) => p.taskId));
-            const missingPdfTasks = PDF_TASKS_DATA.filter(
-              (p) => !existingIds.has(p.taskId)
-            );
-            initialList = [...parsed, ...missingPdfTasks];
+            // Map roles if unassigned
+            const pr = String(item.primaryResponsible || "").toLowerCase();
+            if (pr.includes("software") || pr.includes("developer")) return { ...item, employee: "Disha" };
+            if (pr.includes("project manager")) return { ...item, employee: "Gaurav" };
+            if (pr.includes("marketing") || pr.includes("data") || pr.includes("profile")) return { ...item, employee: "Saniya" };
+            return { ...item, employee: "Sairaj" };
+          });
+
+          const taskMap = new Map<string, OperationTask>();
+          for (const item of updatedWithCleanEmployees) {
+            taskMap.set(item.taskId, item);
           }
+          // Ensure all official PDF/spreadsheet tasks are present and updated
+          for (const required of PDF_TASKS_DATA) {
+            if (!taskMap.has(required.taskId)) {
+              taskMap.set(required.taskId, required);
+            } else if (["PD-048", "PD-049", "PD-050"].includes(required.taskId)) {
+              const existing = taskMap.get(required.taskId)!;
+              taskMap.set(required.taskId, {
+                ...existing,
+                ...required,
+                remarks: existing.remarks || required.remarks,
+              });
+            }
+          }
+          initialList = Array.from(taskMap.values());
+          initialList.sort((a, b) => {
+            const numA = parseInt((a.taskId || "").replace(/\D/g, "") || "0", 10);
+            const numB = parseInt((b.taskId || "").replace(/\D/g, "") || "0", 10);
+            return numA - numB;
+          });
         }
       }
     } catch {
@@ -1004,23 +1374,32 @@ function OperationsPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.tasks) && data.tasks.length > 0) {
-          const apiTasks = data.tasks.map((item: any) => ({
-            id: String(item.id),
-            taskId: item.taskId || "PD-001",
-            workstream: item.workstream || "General",
-            taskActivity: item.taskActivity || "",
-            priority: (item.priority || "Medium") as PriorityLevel,
-            primaryResponsible: item.primaryResponsible || "",
-            supportingRole: item.supportingRole || "",
-            expectedDeliverable: item.expectedDeliverable || "",
-            targetDate: item.targetDate
-              ? String(item.targetDate).slice(0, 10)
-              : "",
-            status: (item.status || "Not Started") as TaskStatus,
-            remarks: item.remarks || "",
-            others: "",
-            createdAt: item.createdAt,
-          }));
+          const apiTasks = data.tasks.map((item: any) => {
+            let emp = item.employee || "Disha";
+            if (emp.toLowerCase().includes("disha")) emp = "Disha";
+            else if (emp.toLowerCase().includes("gaurav")) emp = "Gaurav";
+            else if (emp.toLowerCase().includes("sairaj")) emp = "Sairaj";
+            else if (emp.toLowerCase().includes("saniya")) emp = "Saniya";
+
+            return {
+              id: String(item.id),
+              taskId: item.taskId || "PD-001",
+              workstream: item.workstream || "General",
+              taskActivity: item.taskActivity || "",
+              priority: (item.priority || "Medium") as PriorityLevel,
+              employee: emp,
+              primaryResponsible: item.primaryResponsible || "",
+              supportingRole: item.supportingRole || "",
+              expectedDeliverable: item.expectedDeliverable || "",
+              targetDate: item.targetDate
+                ? String(item.targetDate).slice(0, 10)
+                : "",
+              status: (item.status || "Not Started") as TaskStatus,
+              remarks: item.remarks || "",
+              others: "",
+              createdAt: item.createdAt,
+            };
+          });
 
           const apiIds = new Set(apiTasks.map((t: any) => t.taskId));
           const missingPdfTasks = PDF_TASKS_DATA.filter((p) => !apiIds.has(p.taskId));
@@ -1054,10 +1433,71 @@ function OperationsPage() {
     }
   };
 
-  // Open Create Task form with newly formatted Task ID (PD-046, PD-047, etc.)
+  // ------------------------------------------------------------
+  // STRICT TASK ISOLATION BASED ON AUTHENTICATED USER SESSION:
+  // If logged in as Disha, she can ONLY see Disha's tasks.
+  // There is NO dropdown that lets Disha look into Sairaj or Saniya's tasks!
+  // If logged in as Sairaj, only Sairaj's tasks are visible.
+  // If logged in as Saniya, only Saniya's tasks are visible.
+  // Only Admin has cross-employee visibility.
+  // ------------------------------------------------------------
+  const isolatedTasks = useMemo(() => {
+    if (currentSession.isAdmin) {
+      return tasks;
+    }
+    const currentName = currentSession.name.trim().toLowerCase();
+    return tasks.filter((t) => {
+      const emp = (t.employee || "").trim().toLowerCase();
+      return emp === currentName || emp.includes(currentName) || currentName.includes(emp);
+    });
+  }, [tasks, currentSession]);
+
+  // Secondary Filter: Search, Workstream, Status, Priority
+  const filteredTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return isolatedTasks.filter((t) => {
+      const matchSearch =
+        !q ||
+        [
+          t.taskId,
+          t.workstream,
+          t.taskActivity,
+          t.employee,
+          t.primaryResponsible,
+          t.supportingRole,
+          t.expectedDeliverable,
+          t.remarks,
+        ].some((val) => String(val || "").toLowerCase().includes(q));
+
+      const matchWorkstream =
+        workstreamFilter === "All" || t.workstream === workstreamFilter;
+      const matchStatus = statusFilter === "All" || t.status === statusFilter;
+      const matchPriority =
+        priorityFilter === "All" || t.priority === priorityFilter;
+
+      return matchSearch && matchWorkstream && matchStatus && matchPriority;
+    });
+  }, [isolatedTasks, search, workstreamFilter, statusFilter, priorityFilter]);
+
+  // Statistics counters (strictly calculated for the logged-in user's tasks)
+  const totalTasks = isolatedTasks.length;
+  const inProgressCount = isolatedTasks.filter((t) => t.status === "In Progress").length;
+  const completedCount = isolatedTasks.filter((t) => t.status === "Completed").length;
+  const notStartedCount = isolatedTasks.filter(
+    (t) => t.status === "Not Started" || t.status === "Pending"
+  ).length;
+  const onHoldCount = isolatedTasks.filter((t) => t.status === "On Hold").length;
+  const blockedCount = isolatedTasks.filter((t) => t.status === "Blocked").length;
+  const criticalOrHighCount = isolatedTasks.filter(
+    (t) => t.priority === "Critical" || t.priority === "High" || t.priority === "Urgent"
+  ).length;
+
+  // Open Create Task form
   const handleOpenCreate = () => {
     const nextId = getNextTaskId(tasks);
-    setForm(emptyFormData(nextId));
+    // When employee creates task, auto-assign strictly to them!
+    const defaultEmp = currentSession.isAdmin ? "Disha" : currentSession.name;
+    setForm(emptyFormData(nextId, defaultEmp));
     setEditingId(null);
     setFeedbackMsg(null);
     setShowModal(true);
@@ -1070,6 +1510,7 @@ function OperationsPage() {
       workstream: task.workstream,
       taskActivity: task.taskActivity,
       priority: task.priority,
+      employee: task.employee || currentSession.name,
       primaryResponsible: task.primaryResponsible,
       supportingRole: task.supportingRole,
       expectedDeliverable: task.expectedDeliverable,
@@ -1104,7 +1545,6 @@ function OperationsPage() {
     setSaving(true);
     setFeedbackMsg(null);
 
-    // Make sure taskId is in format PD-001, PD-002, etc.
     let finalTaskId = form.taskId.trim().toUpperCase();
     if (!finalTaskId) {
       finalTaskId = getNextTaskId(tasks);
@@ -1115,7 +1555,8 @@ function OperationsPage() {
     const payload = {
       ...form,
       taskId: finalTaskId,
-      others: "", // others column left blank as requested
+      employee: currentSession.isAdmin ? form.employee : currentSession.name,
+      others: "",
     };
 
     let updatedTasks = [...tasks];
@@ -1187,7 +1628,7 @@ function OperationsPage() {
       type: "success",
       text: editingId
         ? `Task ${finalTaskId} updated successfully.`
-        : `Task ${finalTaskId} created successfully!`,
+        : `Task ${finalTaskId} created and assigned to ${payload.employee}!`,
     });
   };
 
@@ -1236,7 +1677,36 @@ function OperationsPage() {
     }
   };
 
-  // Export CSV
+  // Add Employee Handler
+  const handleAddEmployee = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEmpName.trim()) {
+      alert("Please enter employee name.");
+      return;
+    }
+    const cleanName = newEmpName.trim().charAt(0).toUpperCase() + newEmpName.trim().slice(1);
+    const newEmp: Employee = {
+      id: `emp-${Date.now()}`,
+      name: cleanName,
+      role: newEmpRole.trim(),
+      department: newEmpDept.trim(),
+      email: newEmpEmail.trim() || `${cleanName.toLowerCase()}@payaldecor.com`,
+      phone: newEmpPhone.trim(),
+      avatarColor: "bg-indigo-100 text-indigo-700 border-indigo-200",
+    };
+
+    persistEmployees([...employees, newEmp]);
+    setNewEmpName("");
+    setNewEmpEmail("");
+    setNewEmpPhone("");
+    setFeedbackMsg({
+      type: "success",
+      text: `Employee "${newEmp.name}" registered. They can now log in via email "${newEmp.email}" to see their personal tasks!`,
+    });
+    setShowEmployeeModal(false);
+  };
+
+  // Export CSV (Exports currently isolated and filtered tasks)
   const handleExportCSV = () => {
     if (filteredTasks.length === 0) {
       alert("No tasks to export.");
@@ -1248,6 +1718,7 @@ function OperationsPage() {
       "Workstream",
       "Task / Activity",
       "Priority",
+      "Employee",
       "Primary Responsible Person",
       "Supporting Role",
       "Expected Deliverable",
@@ -1262,6 +1733,7 @@ function OperationsPage() {
       `"${t.workstream || ""}"`,
       `"${(t.taskActivity || "").replace(/"/g, '""')}"`,
       `"${t.priority || ""}"`,
+      `"${(t.employee || "").replace(/"/g, '""')}"`,
       `"${(t.primaryResponsible || "").replace(/"/g, '""')}"`,
       `"${(t.supportingRole || "").replace(/"/g, '""')}"`,
       `"${(t.expectedDeliverable || "").replace(/"/g, '""')}"`,
@@ -1278,62 +1750,221 @@ function OperationsPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
+    const suffix = currentSession.isAdmin ? "admin_all" : currentSession.name.toLowerCase();
     link.setAttribute(
       "download",
-      `operations_daily_tracker_${new Date().toISOString().slice(0, 10)}.csv`
+      `operations_tasks_${suffix}_${new Date().toISOString().slice(0, 10)}.csv`
     );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // Filter tasks based on search & dropdowns
-  const filteredTasks = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return tasks.filter((t) => {
-      const matchSearch =
-        !q ||
-        [
-          t.taskId,
-          t.workstream,
-          t.taskActivity,
-          t.primaryResponsible,
-          t.supportingRole,
-          t.expectedDeliverable,
-          t.remarks,
-        ].some((val) => String(val || "").toLowerCase().includes(q));
+  // Download CSV Template for Import
+  const handleDownloadTemplate = () => {
+    const headers = [
+      "Task ID",
+      "Workstream",
+      "Task / Activity",
+      "Priority",
+      "Employee",
+      "Primary Responsible Person",
+      "Supporting Role",
+      "Expected Deliverable",
+      "Target Date",
+      "Status",
+      "Remarks / Blockers",
+      "Others",
+    ];
+    const sample = [
+      "PD-048",
+      "Software & Operations",
+      "Build live notifications for task updates",
+      "High",
+      "Disha",
+      "Software Developer",
+      "Project Manager",
+      "Real-time task notification component",
+      "2026-11-20",
+      "In Progress",
+      "Requires WebSocket or SSE",
+      "",
+    ];
 
-      const matchWorkstream =
-        workstreamFilter === "All" || t.workstream === workstreamFilter;
-      const matchStatus = statusFilter === "All" || t.status === statusFilter;
-      const matchPriority =
-        priorityFilter === "All" || t.priority === priorityFilter;
+    const csv = [headers.join(","), sample.map((s) => `"${s}"`).join(",")].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "payal_decor_task_import_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-      return matchSearch && matchWorkstream && matchStatus && matchPriority;
+  // Parse CSV Helper
+  const parseCSVString = (csvText: string): OperationTask[] => {
+    const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length < 2) return [];
+
+    const result: OperationTask[] = [];
+    const parseLine = (line: string): string[] => {
+      const row: string[] = [];
+      let inQuotes = false;
+      let cur = "";
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (c === "," && !inQuotes) {
+          row.push(cur.trim());
+          cur = "";
+        } else {
+          cur += c;
+        }
+      }
+      row.push(cur.trim());
+      return row;
+    };
+
+    const headerRow = parseLine(lines[0] || "").map((h) => h.toLowerCase());
+    const findIndex = (keywords: string[]) => {
+      return headerRow.findIndex((h) => keywords.some((k) => h.includes(k)));
+    };
+
+    const idIdx = findIndex(["id"]);
+    const wsIdx = findIndex(["workstream"]);
+    const actIdx = findIndex(["task", "activity"]);
+    const priIdx = findIndex(["priority"]);
+    const empIdx = findIndex(["employee", "assignee", "owner"]);
+    const prIdx = findIndex(["primary", "responsible"]);
+    const srIdx = findIndex(["supporting", "role"]);
+    const delIdx = findIndex(["deliverable", "expected"]);
+    const tdIdx = findIndex(["date", "target"]);
+    const stIdx = findIndex(["status"]);
+    const remIdx = findIndex(["remark", "blocker"]);
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      const cols = parseLine(line);
+      if (cols.length === 0 || !cols.some((c) => c.length > 0)) continue;
+
+      const act = actIdx !== -1 && cols[actIdx] ? cols[actIdx] : cols[2] || cols[1] || "";
+      if (!act) continue;
+
+      let rawId = idIdx !== -1 && cols[idIdx] ? cols[idIdx].trim().toUpperCase() : "";
+      if (!rawId) {
+        rawId = `PD-${String(result.length + 100).padStart(3, "0")}`;
+      } else if (!rawId.startsWith("PD-")) {
+        rawId = `PD-${rawId}`;
+      }
+
+      const rawPri = priIdx !== -1 && cols[priIdx] ? cols[priIdx] : "High";
+      const validPri: PriorityLevel = ["Critical", "Urgent", "High", "Medium", "Low"].includes(rawPri)
+        ? (rawPri as PriorityLevel)
+        : "Medium";
+
+      const rawSt = stIdx !== -1 && cols[stIdx] ? cols[stIdx] : "Not Started";
+      const validStatus: TaskStatus = STATUS_OPTIONS.includes(rawSt as TaskStatus)
+        ? (rawSt as TaskStatus)
+        : "Not Started";
+
+      let empName = empIdx !== -1 && cols[empIdx] ? cols[empIdx].trim() : currentSession.name;
+      if (empName.toLowerCase().includes("disha")) empName = "Disha";
+      else if (empName.toLowerCase().includes("sairaj")) empName = "Sairaj";
+      else if (empName.toLowerCase().includes("saniya")) empName = "Saniya";
+
+      result.push({
+        id: `import-${Date.now()}-${i}`,
+        taskId: rawId,
+        workstream: wsIdx !== -1 && cols[wsIdx] ? cols[wsIdx] : "Software & Operations",
+        taskActivity: act,
+        priority: validPri,
+        employee: empName,
+        primaryResponsible: prIdx !== -1 && cols[prIdx] ? cols[prIdx] : "Software Developer",
+        supportingRole: srIdx !== -1 && cols[srIdx] ? cols[srIdx] : "",
+        expectedDeliverable: delIdx !== -1 && cols[delIdx] ? cols[delIdx] : "",
+        targetDate: tdIdx !== -1 && cols[tdIdx] ? cols[tdIdx].slice(0, 10) : new Date().toISOString().slice(0, 10),
+        status: validStatus,
+        remarks: remIdx !== -1 && cols[remIdx] ? cols[remIdx] : "",
+        others: "",
+      });
+    }
+
+    return result;
+  };
+
+  // Handle CSV file selection
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = String(event.target?.result || "");
+      setImportText(text);
+      const parsed = parseCSVString(text);
+      setImportParsedCount(parsed.length);
+      setImportError(null);
+    };
+    reader.onerror = () => {
+      setImportError("Failed to read file.");
+    };
+    reader.readAsText(file);
+  };
+
+  // Execute Import
+  const handleExecuteImport = () => {
+    if (!importText.trim()) {
+      setImportError("Please upload or paste CSV data first.");
+      return;
+    }
+    const parsed = parseCSVString(importText);
+    if (parsed.length === 0) {
+      setImportError("Could not parse any valid tasks. Check formatting and headers.");
+      return;
+    }
+
+    let nextTasks: OperationTask[];
+    if (importMode === "replace") {
+      nextTasks = parsed;
+    } else {
+      const existingIds = new Set(tasks.map((t) => t.taskId));
+      const adjusted = parsed.map((t) => {
+        if (existingIds.has(t.taskId)) {
+          const newId = getNextTaskId([...tasks, ...nextTasks || []]);
+          return { ...t, taskId: newId };
+        }
+        return t;
+      });
+      nextTasks = [...tasks, ...adjusted];
+    }
+
+    persistTasks(nextTasks);
+    setShowImportModal(false);
+    setImportText("");
+    setImportParsedCount(null);
+    setFeedbackMsg({
+      type: "success",
+      text: `Successfully imported ${parsed.length} tasks (${importMode === "replace" ? "Replaced all" : "Appended"}).`,
     });
-  }, [tasks, search, workstreamFilter, statusFilter, priorityFilter]);
-
-  // Statistics counters
-  const totalTasks = tasks.length;
-  const inProgressCount = tasks.filter((t) => t.status === "In Progress").length;
-  const completedCount = tasks.filter((t) => t.status === "Completed").length;
-  const notStartedCount = tasks.filter(
-    (t) => t.status === "Not Started" || t.status === "Pending"
-  ).length;
-  const onHoldCount = tasks.filter((t) => t.status === "On Hold").length;
-  const blockedCount = tasks.filter((t) => t.status === "Blocked").length;
-  const criticalOrHighCount = tasks.filter(
-    (t) => t.priority === "Critical" || t.priority === "High" || t.priority === "Urgent"
-  ).length;
+  };
 
   const inputClass =
     "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors";
 
   return (
     <AppShell title="Operations">
-      <div className="space-y-5 p-4 md:p-6">
-        {/* Page Top Header with Title, Badges, and Action Buttons */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-4 p-4 md:p-6">
+        {/* ============================================================ */}
+        {/* TOP HEADER & ALL ACTION BUTTONS IN THE SAME LINE             */}
+        {/* ============================================================ */}
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
@@ -1344,55 +1975,133 @@ function OperationsPage() {
                 Payal Decor Modular Furniture
               </span>
             </div>
-            <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight text-gray-900">
+            <h1 className="mt-0.5 flex items-center gap-2 text-2xl font-bold tracking-tight text-gray-900">
               <CheckSquare className="h-6 w-6 text-blue-600" />
               Operations Module
             </h1>
-            <p className="mt-0.5 text-sm text-gray-500">
-              Daily task and execution tracker (PD-001 to PD-047) across workstreams,
-              owners, deliverables, and blockers.
-            </p>
           </div>
 
-          {/* Action Buttons Top Right: Refresh, Export, and CREATE TASK (prominently before table) */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* ALL BUTTONS STRICTLY IN THE SAME LINE (NO WRAPPING) */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 xl:pb-0 shrink-0 flex-nowrap">
+            {/* 1. Refresh */}
             <button
               type="button"
               onClick={() => void loadTasks()}
               title="Refresh tracker"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-xs hover:bg-gray-50 transition-colors"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 whitespace-nowrap transition-colors"
             >
-              <RefreshCw className="h-4 w-4 text-gray-500" />
+              <RefreshCw className="h-3.5 w-3.5 text-gray-500" />
               Refresh
             </button>
 
+            {/* 2. Export */}
             <button
               type="button"
               onClick={handleExportCSV}
               disabled={filteredTasks.length === 0}
               title="Export tasks to CSV"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-xs hover:bg-gray-50 transition-colors disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-2xs hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap transition-colors"
             >
-              <Download className="h-4 w-4 text-gray-500" />
+              <Download className="h-3.5 w-3.5 text-gray-500" />
               Export
             </button>
 
-            {/* Prominent Create Task Button on top right of page before table */}
+            {/* 3. Import (Side of Export) */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowImportModal(true);
+                setImportError(null);
+                setImportText("");
+                setImportParsedCount(null);
+              }}
+              title="Import tasks from CSV"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50/70 px-3 py-2 text-xs font-semibold text-blue-700 shadow-2xs hover:bg-blue-100 whitespace-nowrap transition-colors"
+            >
+              <Upload className="h-3.5 w-3.5 text-blue-600" />
+              Import
+            </button>
+
+            {/* 4. Add Employee */}
+            <button
+              type="button"
+              onClick={() => setShowEmployeeModal(true)}
+              title="Register new team member"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-purple-300 bg-purple-50/70 px-3 py-2 text-xs font-semibold text-purple-700 shadow-2xs hover:bg-purple-100 whitespace-nowrap transition-colors"
+            >
+              <UserPlus className="h-3.5 w-3.5 text-purple-600" />
+              Add Employee
+            </button>
+
+            {/* 5. Employee Login (ONLY visible when logged in as Admin) */}
+            {currentSession.isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModalPassword("");
+                  setLoginError(null);
+                  setShowLoginModal(true);
+                }}
+                title="Sign in as Employee or Admin to view assigned tasks"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50/80 px-3 py-2 text-xs font-semibold text-indigo-700 shadow-2xs hover:bg-indigo-100 whitespace-nowrap transition-colors"
+              >
+                <KeyRound className="h-3.5 w-3.5 text-indigo-600" />
+                Employee Login
+              </button>
+            )}
+
+            {/* 6. Create Task */}
             <button
               type="button"
               onClick={handleOpenCreate}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 active:scale-[0.98] transition-all"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-2xs hover:bg-blue-700 active:scale-[0.98] whitespace-nowrap transition-all"
             >
-              <Plus className="h-4 w-4 stroke-[2.5]" />
+              <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
               Create Task
             </button>
+          </div>
+        </div>
+
+        {/* ============================================================ */}
+        {/* SECURE EMPLOYEE LOGIN & IDENTITY STATUS BANNER               */}
+        {/* Shows who is logged in and enforces task isolation.           */}
+        {/* ============================================================ */}
+        <div className="rounded-xl border border-purple-200 bg-gradient-to-r from-purple-50/90 via-indigo-50/70 to-blue-50/90 p-3.5 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-700 text-white shadow-xs font-bold text-sm select-none">
+              {currentSession.name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold uppercase tracking-wider text-purple-900">
+                  Active Account:
+                </span>
+                <span className="rounded-md bg-purple-200/80 px-2 py-0.5 text-xs font-bold text-purple-900">
+                  {currentSession.name} ({currentSession.email})
+                </span>
+                <span className="text-xs text-purple-700 font-medium">
+                  • {currentSession.role}
+                </span>
+              </div>
+              <p className="text-xs text-purple-900/80 mt-0.5">
+                {currentSession.isAdmin ? (
+                  <span className="font-semibold text-blue-800">
+                    🛡️ Administrator Access: Full organization view across all team tasks.
+                  </span>
+                ) : (
+                  <span>
+                    🔒 <strong>Strict Task Privacy Active:</strong> Logged in as <strong>{currentSession.name}</strong>. Only tasks assigned to {currentSession.name} are visible in this workspace.
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
         </div>
 
         {/* Feedback Alert Message */}
         {feedbackMsg && (
           <div
-            className={`flex items-center justify-between rounded-xl border p-3.5 text-sm ${
+            className={`flex items-center justify-between rounded-xl border p-3 text-sm ${
               feedbackMsg.type === "success"
                 ? "border-green-200 bg-green-50 text-green-800"
                 : "border-red-200 bg-red-50 text-red-800"
@@ -1416,79 +2125,81 @@ function OperationsPage() {
           </div>
         )}
 
-        {/* Metric KPI Overview Cards */}
+        {/* Metric KPI Overview Cards (Strictly scoped to logged in employee) */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-xs">
+          <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-500">
-                Total Tasks
+                {currentSession.isAdmin ? "Total Tasks" : `${currentSession.name}'s Tasks`}
               </span>
               <Layers className="h-4 w-4 text-gray-400" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-gray-900">{totalTasks}</p>
-            <p className="mt-0.5 text-[11px] text-gray-400">PD-001 to PD-047</p>
+            <p className="mt-1.5 text-2xl font-bold text-gray-900">{totalTasks}</p>
+            <p className="mt-0.5 text-[11px] text-gray-400">
+              {currentSession.isAdmin ? "All company tasks" : "Assigned directly to you"}
+            </p>
           </div>
 
-          <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-xs">
+          <div className="rounded-xl border border-blue-100 bg-white p-3.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-blue-600">
                 In Progress
               </span>
               <Clock className="h-4 w-4 text-blue-500" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-blue-700">
+            <p className="mt-1.5 text-2xl font-bold text-blue-700">
               {inProgressCount}
             </p>
             <p className="mt-0.5 text-[11px] text-gray-400">Active execution</p>
           </div>
 
-          <div className="rounded-xl border border-green-100 bg-white p-4 shadow-xs">
+          <div className="rounded-xl border border-green-100 bg-white p-3.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-green-600">
                 Completed
               </span>
               <CheckCircle2 className="h-4 w-4 text-green-500" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-green-700">
+            <p className="mt-1.5 text-2xl font-bold text-green-700">
               {completedCount}
             </p>
             <p className="mt-0.5 text-[11px] text-gray-400">Milestones achieved</p>
           </div>
 
-          <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-xs">
+          <div className="rounded-xl border border-gray-100 bg-white p-3.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-600">
                 Not Started
               </span>
               <Clock className="h-4 w-4 text-gray-400" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-gray-700">
+            <p className="mt-1.5 text-2xl font-bold text-gray-700">
               {notStartedCount}
             </p>
             <p className="mt-0.5 text-[11px] text-gray-400">Upcoming queue</p>
           </div>
 
-          <div className="rounded-xl border border-amber-100 bg-white p-4 shadow-xs">
+          <div className="rounded-xl border border-amber-100 bg-white p-3.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-amber-600">
                 On Hold / Issues
               </span>
               <PauseCircle className="h-4 w-4 text-amber-500" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-amber-700">
+            <p className="mt-1.5 text-2xl font-bold text-amber-700">
               {onHoldCount + blockedCount}
             </p>
             <p className="mt-0.5 text-[11px] text-gray-400">Pending clarity</p>
           </div>
 
-          <div className="rounded-xl border border-red-100 bg-white p-4 shadow-xs">
+          <div className="rounded-xl border border-red-100 bg-white p-3.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-red-600">
                 Critical & High
               </span>
               <AlertCircle className="h-4 w-4 text-red-500" />
             </div>
-            <p className="mt-2 text-2xl font-bold text-red-700">
+            <p className="mt-1.5 text-2xl font-bold text-red-700">
               {criticalOrHighCount}
             </p>
             <p className="mt-0.5 text-[11px] text-gray-400">High priority</p>
@@ -1507,19 +2218,27 @@ function OperationsPage() {
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
                   {filteredTasks.length} {filteredTasks.length === 1 ? "task" : "tasks"}
                 </span>
+                {!currentSession.isAdmin && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800">
+                    <Lock className="h-3 w-3" />
+                    Private to {currentSession.name}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-gray-500">
-                Showing Payal Decor tasks with target dates, deliverables and responsible owners
+              <p className="text-xs text-gray-500 mt-0.5">
+                {currentSession.isAdmin
+                  ? "Showing all Payal Decor tasks across all team members"
+                  : `Showing exclusively tasks assigned to ${currentSession.name} (other members' tasks hidden)`}
               </p>
             </div>
 
             {/* Search and Filters */}
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[220px] flex-1 sm:flex-none">
+              <div className="relative min-w-[200px] flex-1 sm:flex-none">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search Task ID, Activity, Owner..."
+                  placeholder="Search Task ID, Activity..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className={`${inputClass} pl-9`}
@@ -1531,7 +2250,7 @@ function OperationsPage() {
                 aria-label="Filter by workstream"
                 value={workstreamFilter}
                 onChange={(e) => setWorkstreamFilter(e.target.value)}
-                className={`${inputClass} w-auto text-xs sm:text-sm`}
+                className={`${inputClass} w-auto text-xs`}
               >
                 <option value="All">All Workstreams</option>
                 {WORKSTREAM_OPTIONS.map((ws) => (
@@ -1546,7 +2265,7 @@ function OperationsPage() {
                 aria-label="Filter by status"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className={`${inputClass} w-auto text-xs sm:text-sm`}
+                className={`${inputClass} w-auto text-xs`}
               >
                 <option value="All">All Statuses</option>
                 {STATUS_OPTIONS.map((s) => (
@@ -1561,7 +2280,7 @@ function OperationsPage() {
                 aria-label="Filter by priority"
                 value={priorityFilter}
                 onChange={(e) => setPriorityFilter(e.target.value)}
-                className={`${inputClass} w-auto text-xs sm:text-sm`}
+                className={`${inputClass} w-auto text-xs`}
               >
                 <option value="All">All Priorities</option>
                 {PRIORITY_OPTIONS.map((p) => (
@@ -1591,7 +2310,7 @@ function OperationsPage() {
             </div>
           </div>
 
-          {/* Main Table with all 11 required columns */}
+          {/* Main Table: Employee column strictly after Priority */}
           {loading ? (
             <div className="flex flex-col items-center justify-center p-12 text-sm text-gray-500">
               <RefreshCw className="h-6 w-6 animate-spin text-blue-600 mb-2" />
@@ -1604,59 +2323,79 @@ function OperationsPage() {
                 No matching tasks found
               </p>
               <p className="text-sm text-gray-500 mt-1 max-w-sm">
-                Try clearing your search query or filters.
+                {!currentSession.isAdmin
+                  ? `No tasks currently assigned to ${currentSession.name} match the filters.`
+                  : "Try clearing your search query or filters."}
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearch("");
-                  setWorkstreamFilter("All");
-                  setStatusFilter("All");
-                  setPriorityFilter("All");
-                }}
-                className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Clear filters
-              </button>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch("");
+                    setWorkstreamFilter("All");
+                    setStatusFilter("All");
+                    setPriorityFilter("All");
+                  }}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Clear filters
+                </button>
+              </div>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1250px] text-left text-sm">
+              <table className="w-full min-w-[1350px] text-left text-sm">
                 <thead className="border-b border-gray-200 bg-gray-50/80 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   <tr>
+                    {/* 1. Task ID */}
                     <th scope="col" className="p-3.5 w-28">
                       Task ID
                     </th>
+                    {/* 2. Workstream */}
                     <th scope="col" className="p-3.5 w-44">
                       Workstream
                     </th>
+                    {/* 3. Task / Activity */}
                     <th scope="col" className="p-3.5 min-w-[240px]">
                       Task / Activity
                     </th>
+                    {/* 4. Priority */}
                     <th scope="col" className="p-3.5 w-28">
                       Priority
                     </th>
+                    {/* 5. EMPLOYEE COLUMN AFTER PRIORITY */}
+                    <th scope="col" className="p-3.5 w-36">
+                      Employee
+                    </th>
+                    {/* 6. Primary Responsible Person */}
                     <th scope="col" className="p-3.5 w-44">
                       Primary Responsible Person
                     </th>
+                    {/* 7. Supporting Role */}
                     <th scope="col" className="p-3.5 w-40">
                       Supporting Role
                     </th>
+                    {/* 8. Expected Deliverable */}
                     <th scope="col" className="p-3.5 min-w-[220px]">
                       Expected Deliverable
                     </th>
+                    {/* 9. Target Date */}
                     <th scope="col" className="p-3.5 w-32">
                       Target Date
                     </th>
+                    {/* 10. Status */}
                     <th scope="col" className="p-3.5 w-36">
                       Status
                     </th>
+                    {/* 11. Remarks / Blockers */}
                     <th scope="col" className="p-3.5 min-w-[200px]">
                       Remarks / Blockers
                     </th>
+                    {/* 12. Others */}
                     <th scope="col" className="p-3.5 w-24">
                       Others
                     </th>
+                    {/* Actions */}
                     <th scope="col" className="p-3.5 w-24 text-center">
                       Actions
                     </th>
@@ -1678,8 +2417,8 @@ function OperationsPage() {
                         }`}
                       >
                         {/* 1. Task ID (PD-001 format) */}
-                        <td className="p-3.5 align-top whitespace-nowrap">
-                          <span className="inline-block rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-bold text-slate-800 border border-slate-200">
+                        <td className="p-3.5 align-top font-mono text-xs font-bold text-slate-800">
+                          <span className="rounded bg-slate-100 px-2 py-1 border border-slate-200">
                             {task.taskId}
                           </span>
                         </td>
@@ -1687,7 +2426,7 @@ function OperationsPage() {
                         {/* 2. Workstream */}
                         <td className="p-3.5 align-top">
                           <span
-                            className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium leading-tight ${getWorkstreamBadgeColor(
+                            className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium ${getWorkstreamBadgeColor(
                               task.workstream
                             )}`}
                           >
@@ -1697,80 +2436,61 @@ function OperationsPage() {
 
                         {/* 3. Task / Activity */}
                         <td className="p-3.5 align-top">
-                          <div className="font-medium text-gray-900 leading-snug">
+                          <p className="font-medium text-gray-900 leading-snug">
                             {task.taskActivity}
-                          </div>
+                          </p>
                         </td>
 
                         {/* 4. Priority */}
-                        <td className="p-3.5 align-top whitespace-nowrap">
+                        <td className="p-3.5 align-top">
                           {getPriorityBadge(task.priority)}
                         </td>
 
-                        {/* 5. Primary Responsible Person */}
+                        {/* 5. EMPLOYEE COLUMN AFTER PRIORITY */}
                         <td className="p-3.5 align-top">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">
-                              {task.primaryResponsible
-                                ? task.primaryResponsible
-                                    .split(" ")
-                                    .map((n) => n[0])
-                                    .join("")
-                                    .toUpperCase()
-                                    .slice(0, 2)
-                                : "P"}
-                            </div>
-                            <span className="font-medium text-gray-800">
-                              {task.primaryResponsible}
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-700 border border-slate-200">
+                              {task.employee.charAt(0).toUpperCase()}
+                            </span>
+                            <span className="font-semibold text-xs text-gray-800">
+                              {task.employee}
                             </span>
                           </div>
                         </td>
 
-                        {/* 6. Supporting role */}
-                        <td className="p-3.5 align-top">
-                          {task.supportingRole ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2 py-0.5">
-                              <Users2 className="h-3 w-3 text-gray-400" />
-                              {task.supportingRole}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400 text-xs">—</span>
-                          )}
+                        {/* 6. Primary Responsible Person */}
+                        <td className="p-3.5 align-top font-medium text-gray-800 text-xs">
+                          {task.primaryResponsible}
                         </td>
 
-                        {/* 7. Expected Deliverable */}
-                        <td className="p-3.5 align-top">
-                          {task.expectedDeliverable ? (
-                            <div className="flex items-start gap-1.5 text-xs text-gray-700 leading-snug">
-                              <Target className="h-3.5 w-3.5 shrink-0 text-emerald-600 mt-0.5" />
-                              <span>{task.expectedDeliverable}</span>
-                            </div>
-                          ) : (
-                            <span className="text-gray-400 text-xs">—</span>
-                          )}
+                        {/* 7. Supporting Role */}
+                        <td className="p-3.5 align-top text-gray-600 text-xs">
+                          {task.supportingRole || <span className="text-gray-400">—</span>}
                         </td>
 
-                        {/* 8. Target Date */}
-                        <td className="p-3.5 align-top whitespace-nowrap">
-                          <div className="flex items-center gap-1.5 text-xs text-gray-700">
+                        {/* 8. Expected Deliverable */}
+                        <td className="p-3.5 align-top text-gray-700 text-xs leading-relaxed">
+                          {task.expectedDeliverable || <span className="text-gray-400">—</span>}
+                        </td>
+
+                        {/* 9. Target Date */}
+                        <td className="p-3.5 align-top text-xs font-medium text-gray-800 whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
                             <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                            <span>{formatDateDisplay(task.targetDate)}</span>
+                            {formatDateDisplay(task.targetDate)}
                           </div>
                         </td>
 
-                        {/* 9. Status */}
+                        {/* 10. Status */}
                         <td className="p-3.5 align-top">
                           <div className="relative inline-block">
                             <select
-                              aria-label={`Status for task ${task.taskId}`}
+                              aria-label={`Change status for ${task.taskId}`}
                               value={task.status}
                               onChange={(e) =>
-                                void handleStatusChange(
-                                  task,
-                                  e.target.value as TaskStatus
-                                )
+                                void handleStatusChange(task, e.target.value as TaskStatus)
                               }
-                              className="cursor-pointer appearance-none rounded-full border border-gray-200 bg-white py-1 pl-2.5 pr-6 text-xs font-medium text-gray-700 shadow-2xs hover:border-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              className="appearance-none rounded-lg border border-gray-200 bg-white py-1 pl-2.5 pr-6 text-xs font-medium text-gray-800 shadow-2xs hover:border-gray-300 focus:border-blue-500 focus:outline-none cursor-pointer"
                             >
                               {STATUS_OPTIONS.map((st) => (
                                 <option key={st} value={st}>
@@ -1784,7 +2504,7 @@ function OperationsPage() {
                           </div>
                         </td>
 
-                        {/* 10. Remarks / Blockers */}
+                        {/* 11. Remarks / Blockers */}
                         <td className="p-3.5 align-top">
                           {task.remarks ? (
                             <div
@@ -1809,7 +2529,7 @@ function OperationsPage() {
                           )}
                         </td>
 
-                        {/* 11. Others (Left blank as requested) */}
+                        {/* 12. Others */}
                         <td className="p-3.5 align-top text-gray-300 text-xs">
                           {task.others || "—"}
                         </td>
@@ -1853,6 +2573,458 @@ function OperationsPage() {
         </section>
 
         {/* ============================================================ */}
+        {/* EMPLOYEE & ADMIN LOGIN MODAL (WITH DROPDOWN & OWN PASSWORD)  */}
+        {/* ============================================================ */}
+        {showLoginModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-xs overflow-y-auto">
+            <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
+                    <KeyRound className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">
+                      Sign In to Workspace
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      Select role and enter credentials
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close modal"
+                  onClick={() => setShowLoginModal(false)}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handlePerformLogin} className="mt-4 space-y-3.5">
+                {loginError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs font-semibold text-red-700 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{loginError}</span>
+                  </div>
+                )}
+
+                {/* Dropdown: Role Selection (Admin or Employee) */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">
+                    Sign In As <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={modalLoginRole}
+                    onChange={(e) => {
+                      setModalLoginRole(e.target.value as "admin" | "employee");
+                      setLoginError(null);
+                      setModalPassword("");
+                    }}
+                    className={inputClass}
+                  >
+                    <option value="admin">Administrator (Superuser / Master View)</option>
+                    <option value="employee">Employee (Private Workspace & Personal Tasks)</option>
+                  </select>
+                </div>
+
+                {modalLoginRole === "admin" ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Admin ID <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={modalAdminId}
+                      onChange={(e) => setModalAdminId(e.target.value)}
+                      placeholder="admin"
+                      className={`${inputClass} font-mono`}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Select Employee Profile <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={modalEmployeeId}
+                      onChange={(e) => {
+                        setModalEmployeeId(e.target.value);
+                        setLoginError(null);
+                        setModalPassword("");
+                      }}
+                      className={inputClass}
+                    >
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.name.toLowerCase()}>
+                          {emp.name} — {emp.role} ({emp.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Password input with toggle */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {modalLoginRole === "admin" ? "Admin Password" : "Employee Password"}{" "}
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showModalPassword ? "text" : "password"}
+                      required
+                      value={modalPassword}
+                      onChange={(e) => setModalPassword(e.target.value)}
+                      placeholder={
+                        modalLoginRole === "admin"
+                          ? "Enter admin password"
+                          : "Enter your employee password"
+                      }
+                      className={`${inputClass} pr-10`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowModalPassword((v) => !v)}
+                      aria-label={showModalPassword ? "Hide password" : "Show password"}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                    >
+                      {showModalPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {modalLoginRole === "admin"
+                      ? "Admin access unlocks master visibility across all 47 tasks."
+                      : "Employee accounts show strictly the tasks assigned to that employee."}
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-purple-700 px-4 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-purple-800 transition-colors"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Sign In to Workspace
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* IMPORT TASKS MODAL (JUST SIDE OF EXPORT)                    */}
+        {/* ============================================================ */}
+        {showImportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-xs overflow-y-auto">
+            <div className="relative w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between border-b pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                    <Upload className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      Import Operations Tasks (CSV)
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Upload a CSV file or paste formatted rows directly
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close modal"
+                  onClick={() => setShowImportModal(false)}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                  <div className="flex items-center gap-2 text-xs text-blue-900">
+                    <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+                    <span>
+                      Columns: <strong>Task ID, Workstream, Task / Activity, Priority, Employee, Primary Responsible, Supporting Role, Expected Deliverable, Target Date, Status, Remarks</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="inline-flex items-center gap-1 shrink-0 rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 shadow-2xs"
+                  >
+                    <Download className="h-3 w-3" />
+                    Template
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Upload CSV File:
+                  </label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={handleFileUpload}
+                    className="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-lg p-1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Or Paste CSV Data Directly:
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={importText}
+                    onChange={(e) => {
+                      setImportText(e.target.value);
+                      const parsed = parseCSVString(e.target.value);
+                      setImportParsedCount(parsed.length);
+                      setImportError(null);
+                    }}
+                    placeholder={`"Task ID","Workstream","Task / Activity","Priority","Employee","Primary Responsible Person","Supporting Role","Expected Deliverable","Target Date","Status","Remarks","Others"\n"PD-048","Software & Operations","Build client portal","High","Disha","Software Developer","Project Manager","Portal MVP","2026-11-25","Not Started","",""`}
+                    className={`${inputClass} font-mono text-xs`}
+                  />
+                  {importParsedCount !== null && (
+                    <p className="mt-1 text-xs font-semibold text-green-700 flex items-center gap-1">
+                      <Check className="h-3.5 w-3.5" />
+                      Detected {importParsedCount} valid task {importParsedCount === 1 ? "row" : "rows"} ready to import.
+                    </p>
+                  )}
+                  {importError && (
+                    <p className="mt-1 text-xs font-medium text-red-600 flex items-center gap-1">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      {importError}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                    Import Mode:
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className={`flex items-start gap-2 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      importMode === "append" ? "border-blue-500 bg-blue-50/50" : "border-gray-200"
+                    }`}>
+                      <input
+                        type="radio"
+                        name="importMode"
+                        checked={importMode === "append"}
+                        onChange={() => setImportMode("append")}
+                        className="mt-0.5 text-blue-600"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-gray-900">Append Tasks</span>
+                        <p className="text-[11px] text-gray-500">Keep current tasks and append new rows</p>
+                      </div>
+                    </label>
+
+                    <label className={`flex items-start gap-2 rounded-lg border p-3 cursor-pointer transition-colors ${
+                      importMode === "replace" ? "border-amber-500 bg-amber-50/50" : "border-gray-200"
+                    }`}>
+                      <input
+                        type="radio"
+                        name="importMode"
+                        checked={importMode === "replace"}
+                        onChange={() => setImportMode("replace")}
+                        className="mt-0.5 text-amber-600"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-amber-900">Replace All</span>
+                        <p className="text-[11px] text-gray-500">Overwrite existing tasks with this file</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setShowImportModal(false)}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExecuteImport}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Confirm Import
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* ADD EMPLOYEE MODAL (CONFIGURED DISHA, SAIRAJ, SANIYA)        */}
+        {/* ============================================================ */}
+        {showEmployeeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4 backdrop-blur-xs overflow-y-auto">
+            <div className="relative w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between border-b pb-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
+                    <UserPlus className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      Add Employee & Team Roster
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Register employees who can log in with their email to view their tasks
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close modal"
+                  onClick={() => setShowEmployeeModal(false)}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddEmployee} className="mt-4 space-y-4">
+                <div className="rounded-xl border border-purple-100 bg-purple-50/40 p-4 space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-purple-900">
+                    Register New Employee
+                  </h4>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Employee Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newEmpName}
+                        onChange={(e) => setNewEmpName(e.target.value)}
+                        placeholder="e.g. Rahul"
+                        className={inputClass}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Designation / Role <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newEmpRole}
+                        onChange={(e) => setNewEmpRole(e.target.value)}
+                        placeholder="e.g. Site Engineer"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Email Address (Used for Login) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={newEmpEmail}
+                        onChange={(e) => setNewEmpEmail(e.target.value)}
+                        placeholder="name@payaldecor.com"
+                        className={inputClass}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Department
+                      </label>
+                      <select
+                        value={newEmpDept}
+                        onChange={(e) => setNewEmpDept(e.target.value)}
+                        className={inputClass}
+                      >
+                        {WORKSTREAM_OPTIONS.map((ws) => (
+                          <option key={ws} value={ws}>
+                            {ws}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-purple-700 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-purple-800"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Add Employee
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Configured Team Members */}
+              <div className="mt-5 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                  Configured Active Team Members ({employees.length})
+                </h4>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  {employees.map((emp) => {
+                    const assignedCount = tasks.filter(
+                      (t) => (t.employee || "").toLowerCase() === emp.name.toLowerCase()
+                    ).length;
+                    return (
+                      <div
+                        key={emp.id}
+                        className="rounded-xl border border-gray-200 bg-white p-3 shadow-2xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-800 border border-purple-200">
+                            {emp.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-gray-900">{emp.name}</p>
+                            <p className="text-[10px] text-gray-500 truncate">{emp.email}</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-[11px]">
+                          <span className="text-gray-500">{emp.role}</span>
+                          <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700 border border-purple-200">
+                            {assignedCount} tasks
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end border-t pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEmployeeModal(false)}
+                  className="rounded-lg bg-gray-900 px-4 py-2 text-xs font-medium text-white hover:bg-gray-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
         {/* CREATE / EDIT TASK MODAL                                    */}
         {/* ============================================================ */}
         {showModal && (
@@ -1880,7 +3052,6 @@ function OperationsPage() {
               </div>
 
               <form onSubmit={handleSaveTask} className="mt-4 space-y-4">
-                {/* Row 1: Task ID (auto-generated format PD-001), Workstream, Priority */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -1893,7 +3064,7 @@ function OperationsPage() {
                       onChange={(e) =>
                         setForm((prev) => ({ ...prev, taskId: e.target.value }))
                       }
-                      placeholder="e.g. PD-046"
+                      placeholder="e.g. PD-048"
                       className={`${inputClass} font-mono font-bold bg-slate-50`}
                     />
                     <p className="mt-0.5 text-[11px] text-gray-400">
@@ -1943,7 +3114,53 @@ function OperationsPage() {
                   </div>
                 </div>
 
-                {/* Row 2: Task / Activity (description) */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Assigned Employee <span className="text-red-500">*</span>
+                    </label>
+                    {currentSession.isAdmin ? (
+                      <select
+                        required
+                        value={form.employee}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, employee: e.target.value }))
+                        }
+                        className={`${inputClass} font-bold text-purple-900 bg-purple-50/50 border-purple-200`}
+                      >
+                        {employees.map((emp) => (
+                          <option key={emp.id} value={emp.name}>
+                            {emp.name} ({emp.role})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="rounded-lg border border-purple-200 bg-purple-50/50 px-3 py-2 text-sm font-bold text-purple-900">
+                        {currentSession.name} (Locked to Logged In Account)
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      Primary Responsible Person <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={form.primaryResponsible}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          primaryResponsible: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. Software Developer"
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Task / Activity <span className="text-red-500">*</span>
@@ -1960,27 +3177,7 @@ function OperationsPage() {
                   />
                 </div>
 
-                {/* Row 3: Primary Responsible Person & Supporting Role */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Primary Responsible Person <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={form.primaryResponsible}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          primaryResponsible: e.target.value,
-                        }))
-                      }
-                      placeholder="e.g. Project Manager / Software Developer"
-                      className={inputClass}
-                    />
-                  </div>
-
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
                       Supporting Role
@@ -1994,28 +3191,7 @@ function OperationsPage() {
                           supportingRole: e.target.value,
                         }))
                       }
-                      placeholder="e.g. Software Developer / Digital Marketing"
-                      className={inputClass}
-                    />
-                  </div>
-                </div>
-
-                {/* Row 4: Expected Deliverable & Target Date */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Expected Deliverable
-                    </label>
-                    <input
-                      type="text"
-                      value={form.expectedDeliverable}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          expectedDeliverable: e.target.value,
-                        }))
-                      }
-                      placeholder="e.g. Approved workflow covering enquiry through project closure"
+                      placeholder="e.g. Project Manager"
                       className={inputClass}
                     />
                   </div>
@@ -2036,7 +3212,24 @@ function OperationsPage() {
                   </div>
                 </div>
 
-                {/* Row 5: Status & Others */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Expected Deliverable
+                  </label>
+                  <input
+                    type="text"
+                    value={form.expectedDeliverable}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        expectedDeliverable: e.target.value,
+                      }))
+                    }
+                    placeholder="Deliverable details"
+                    className={inputClass}
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
@@ -2076,7 +3269,6 @@ function OperationsPage() {
                   </div>
                 </div>
 
-                {/* Row 6: Remarks / Blockers */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Remarks / Blockers
@@ -2087,12 +3279,11 @@ function OperationsPage() {
                     onChange={(e) =>
                       setForm((prev) => ({ ...prev, remarks: e.target.value }))
                     }
-                    placeholder="Note any delays, vendor issues, requirements changes or milestones..."
+                    placeholder="Note any delays or notes..."
                     className={inputClass}
                   />
                 </div>
 
-                {/* Buttons */}
                 <div className="flex items-center justify-end gap-3 pt-3 border-t">
                   <button
                     type="button"
@@ -2175,31 +3366,41 @@ function OperationsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3">
+                    <span className="text-xs font-semibold text-purple-900">Assigned Employee</span>
+                    <p className="mt-1 font-bold text-purple-950 flex items-center gap-1.5">
+                      <User className="h-4 w-4 text-purple-700" />
+                      {viewingTask.employee}
+                    </p>
+                  </div>
                   <div className="rounded-lg border p-3">
                     <span className="text-xs text-gray-500">Primary Responsible Person</span>
                     <p className="mt-1 font-semibold text-gray-900">
                       {viewingTask.primaryResponsible}
                     </p>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border p-3">
                     <span className="text-xs text-gray-500">Supporting Role</span>
                     <p className="mt-1 text-gray-800">
                       {viewingTask.supportingRole || "—"}
                     </p>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border p-3">
-                    <span className="text-xs text-gray-500">Expected Deliverable</span>
-                    <p className="mt-1 text-gray-800">
-                      {viewingTask.expectedDeliverable || "—"}
-                    </p>
-                  </div>
                   <div className="rounded-lg border p-3">
                     <span className="text-xs text-gray-500">Target Date</span>
                     <p className="mt-1 font-semibold text-gray-900">
                       {formatDateDisplay(viewingTask.targetDate)}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="rounded-lg border p-3">
+                    <span className="text-xs text-gray-500">Expected Deliverable</span>
+                    <p className="mt-1 text-gray-800">
+                      {viewingTask.expectedDeliverable || "—"}
                     </p>
                   </div>
                 </div>
@@ -2251,4 +3452,5 @@ function OperationsPage() {
     </AppShell>
   );
 }
+
 export default OperationsPage;

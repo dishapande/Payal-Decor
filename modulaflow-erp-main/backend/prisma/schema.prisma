@@ -505,6 +505,7 @@ model OperationTask {
   workstream          String
   taskActivity        String
   priority            String    @default("Medium")
+  employee            String?
   primaryResponsible String
   supportingRole      String?
   expectedDeliverable String?
@@ -519,5 +520,6 @@ model OperationTask {
   @@index([workstream])
   @@index([status])
   @@index([priority])
+  @@index([employee])
   @@map("operation_tasks")
 }
